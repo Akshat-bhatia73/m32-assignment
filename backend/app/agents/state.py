@@ -15,7 +15,8 @@ class GraphState(TypedDict, total=False):
     messages: Annotated[list[BaseMessage], add_messages]
     session_id: uuid.UUID
     user_id: uuid.UUID
+    user_name: str | None
     meeting_id: uuid.UUID | None
-    # Board mutations queued by tools, drained by the streamer as data-action-item parts.
-    board_events: list[dict[str, Any]]
-    route: str
+    route: str  # set by the router node: "extract" | "chat"
+    # Action items created this turn (board events), passed from extractor -> summarize.
+    extracted: list[dict[str, Any]]

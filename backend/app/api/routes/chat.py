@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 
-from app.agents.conversation import stream_reply
+from app.agents.graph import stream_agent
 from app.api.deps import CurrentUser, DbSession
 from app.models import ChatSession, Message
 from app.schemas.chat import ChatRequest
@@ -37,7 +37,9 @@ def chat_stream(
     async def generator() -> AsyncGenerator[str, None]:
         assistant_text = ""
         try:
-            async for chunk, final in stream_reply(payload.message, history):
+            async for chunk, final in stream_agent(
+                payload.message, history, session.id, current_user.id, current_user.name
+            ):
                 if final is not None:
                     assistant_text = final
                 yield chunk
