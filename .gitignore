@@ -1,0 +1,42 @@
+# ---- Secrets / env (NEVER commit) ----
+.env
+.env.*
+!.env.example
+*.local
+.env.gh.local
+
+# ---- Python / backend ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.db
+*.sqlite3
+
+# ---- Node / frontend ----
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.tsbuildinfo
+.turbo/
+
+# ---- Build / deploy ----
+.vercel/
+.render/
+
+# ---- Local-only docs / assignment brief (do not publish) ----
+docs/
+Copy of M32 Project for Fullstack + AI Role - 2026.pdf
+
+# ---- OS / editor ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
