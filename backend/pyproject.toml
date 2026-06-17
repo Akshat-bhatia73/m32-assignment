@@ -1,0 +1,43 @@
+[project]
+name = "m32-backend"
+version = "0.1.0"
+description = "Meeting -> Done Ops Copilot — FastAPI + LangGraph backend"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "sqlalchemy>=2.0.36",
+    "alembic>=1.14",
+    "psycopg[binary]>=3.2",
+    "pydantic[email]>=2.10",
+    "pydantic-settings>=2.7",
+    "python-jose[cryptography]>=3.3",
+    "passlib[bcrypt]>=1.7.4",
+    "bcrypt>=4.0,<4.1",
+    "authlib>=1.4",
+    "httpx>=0.28",
+    "python-multipart>=0.0.20",
+    "langgraph>=0.2.60",
+    "langchain>=0.3.13",
+    "langchain-core>=0.3.28",
+    "langchain-google-genai>=2.0.7",
+    "langchain-openai>=0.2.14",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.8",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.25",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

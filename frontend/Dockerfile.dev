@@ -1,0 +1,15 @@
+# Dev-only image: runs the Vite dev server with HMR via bun.
+# Production frontend deploys to Vercel (static build) — this is just for `docker compose up`.
+FROM oven/bun:1
+
+WORKDIR /app
+
+# Install deps first for layer caching; bun.lock keeps it reproducible.
+COPY package.json bun.lock* ./
+RUN bun install
+
+COPY . .
+
+EXPOSE 5173
+# --host binds 0.0.0.0 so the server is reachable from outside the container.
+CMD ["bun", "run", "dev", "--host", "0.0.0.0"]

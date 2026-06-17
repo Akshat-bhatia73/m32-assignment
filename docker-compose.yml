@@ -1,0 +1,71 @@
+# One-command dev stack: `docker compose up --build`
+#
+#   db        local Postgres 16 (so the stack runs with zero external setup)
+#   backend   FastAPI + LangGraph, runs Alembic migrations on start, hot-reload
+#   frontend  Vite dev server (bun) with HMR
+#
+# Config comes from a root `.env` (gitignored — copy from `.env.example`). Everything has a
+# sane default, so `docker compose up` works before you've signed up for any external service.
+# To use Neon instead of the local db, set DATABASE_URL in `.env` (see .env.example).
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-m32}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-m32}
+      POSTGRES_DB: ${POSTGRES_DB:-m32}
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-m32} -d ${POSTGRES_DB:-m32}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Defaults to the local db container; override in .env to point at Neon.
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://m32:m32@db:5432/m32}
+      JWT_SECRET: ${JWT_SECRET:-dev-insecure-secret-change-me}
+      LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.0-flash}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      COMPOSIO_API_KEY: ${COMPOSIO_API_KEY:-}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:5173}
+      COOKIE_SAMESITE: ${COOKIE_SAMESITE:-lax}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - /app/.venv  # keep the image's venv; don't let the bind mount shadow it
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    depends_on:
+      - backend
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules  # keep the image's installed deps
+
+volumes:
+  db_data:
