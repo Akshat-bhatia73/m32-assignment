@@ -31,6 +31,7 @@ class Settings(BaseSettings):
 
     # Composio
     composio_api_key: str = ""
+    composio_timezone: str = "UTC"  # IANA tz for created calendar events
 
     # CORS / cookies
     frontend_origin: str = "http://localhost:5173"

@@ -38,7 +38,12 @@ def chat_stream(
         assistant_text = ""
         try:
             async for chunk, final in stream_agent(
-                payload.message, history, session.id, current_user.id, current_user.name
+                payload.message,
+                history,
+                session.id,
+                current_user.id,
+                current_user.name,
+                current_user.email,
             ):
                 if final is not None:
                     assistant_text = final

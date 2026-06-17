@@ -9,8 +9,11 @@ directly), which is far more reliable than a free-form tool-calling loop.
 import uuid
 from datetime import date
 
+from sqlalchemy import select
+
 from app.database import SessionLocal
 from app.models import ActionItem, Meeting
+from app.models.action_item import ACTION_STATUSES
 
 
 def _parse_date(value: str | None) -> date | None:
@@ -73,3 +76,75 @@ def add_action_item(
         db.commit()
         db.refresh(item)
         return _event(item, "created")
+
+
+def list_items(session_id: uuid.UUID, *, open_only: bool = False) -> list[dict]:
+    """Lightweight board snapshot for grounding the agent's edits (id + fields)."""
+    with SessionLocal() as db:
+        stmt = select(ActionItem).where(ActionItem.session_id == session_id)
+        if open_only:
+            stmt = stmt.where(ActionItem.status == "open")
+        rows = db.scalars(stmt.order_by(ActionItem.created_at)).all()
+        return [
+            {
+                "id": str(r.id),
+                "task": r.task,
+                "owner": r.owner,
+                "due_date": r.due_date.isoformat() if r.due_date else None,
+                "status": r.status,
+            }
+            for r in rows
+        ]
+
+
+_CLEAR = "__clear__"  # sentinel: explicitly null out a field
+
+
+def update_action_item(
+    action_id: str,
+    *,
+    task: str | None = None,
+    owner: str | None = None,
+    due_date: str | None = None,
+    status: str | None = None,
+) -> dict | None:
+    """Update fields on an item. Pass the _CLEAR sentinel to null owner/due_date."""
+    with SessionLocal() as db:
+        item = db.get(ActionItem, uuid.UUID(action_id))
+        if item is None:
+            return None
+        if task is not None:
+            item.task = task
+        if owner is not None:
+            item.owner = None if owner == _CLEAR else owner
+        if due_date is not None:
+            item.due_date = None if due_date == _CLEAR else _parse_date(due_date)
+        if status is not None and status in ACTION_STATUSES:
+            item.status = status
+        db.commit()
+        db.refresh(item)
+        return _event(item, "updated")
+
+
+def set_status(action_id: str, status: str, *, external_ref: str | None = None) -> dict | None:
+    with SessionLocal() as db:
+        item = db.get(ActionItem, uuid.UUID(action_id))
+        if item is None or status not in ACTION_STATUSES:
+            return None
+        item.status = status
+        if external_ref is not None:
+            item.external_ref = external_ref
+        db.commit()
+        db.refresh(item)
+        return _event(item, "updated")
+
+
+def delete_action_item(action_id: str) -> dict | None:
+    with SessionLocal() as db:
+        item = db.get(ActionItem, uuid.UUID(action_id))
+        if item is None:
+            return None
+        event = _event(item, "deleted")
+        db.delete(item)
+        db.commit()
+        return event

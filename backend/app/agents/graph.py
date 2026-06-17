@@ -16,11 +16,15 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langgraph.graph import END, START, StateGraph
 
 from app.agents.conversation import extract_text
+from app.agents.nodes.comms import comms_node
+from app.agents.nodes.confirm import confirm_node
+from app.agents.nodes.edit import edit_node
 from app.agents.nodes.extractor import extractor_node
 from app.agents.nodes.respond import respond_node
 from app.agents.nodes.router import router_node
 from app.agents.nodes.summarize import summarize_node
 from app.agents.state import GraphState
+from app.agents.tools import session_tools
 from app.llm.provider import has_llm
 from app.services import ai_stream
 
@@ -34,16 +38,28 @@ def get_graph():
     builder.add_node("router", router_node)
     builder.add_node("extractor", extractor_node)
     builder.add_node("summarize", summarize_node)
+    builder.add_node("edit", edit_node)
+    builder.add_node("comms", comms_node)
+    builder.add_node("confirm", confirm_node)
     builder.add_node("respond", respond_node)
 
     builder.add_edge(START, "router")
     builder.add_conditional_edges(
         "router",
         lambda s: s["route"],
-        {"extract": "extractor", "chat": "respond"},
+        {
+            "extract": "extractor",
+            "edit": "edit",
+            "comms": "comms",
+            "confirm": "confirm",
+            "chat": "respond",
+        },
     )
     builder.add_edge("extractor", "summarize")
     builder.add_edge("summarize", END)
+    builder.add_edge("edit", END)
+    builder.add_edge("comms", END)
+    builder.add_edge("confirm", END)
     builder.add_edge("respond", END)
     return builder.compile()
 
@@ -81,6 +97,7 @@ async def stream_agent(
     session_id: uuid.UUID,
     user_id: uuid.UUID,
     user_name: str | None = None,
+    user_email: str | None = None,
 ) -> AsyncGenerator[tuple[str, str | None], None]:
     """Yield (sse_chunk, final_assistant_text|None) pairs.
 
@@ -97,6 +114,8 @@ async def stream_agent(
         "session_id": session_id,
         "user_id": user_id,
         "user_name": user_name,
+        "user_email": user_email,
+        "pending_action": session_tools.get_pending_action(session_id),
     }
 
     text_id = uuid.uuid4().hex
@@ -121,6 +140,13 @@ async def stream_agent(
                 yield ai_stream.sse(
                     ai_stream.data_part("action-item", item, part_id=item["id"])
                 ), None
+            elif kind == "say":
+                # Deterministic assistant text from a node (edits / drafts / confirmations).
+                if not text_open:
+                    yield ai_stream.sse(ai_stream.text_start(text_id)), None
+                    text_open = True
+                full_text += chunk["text"]
+                yield ai_stream.sse(ai_stream.text_delta(text_id, chunk["text"])), None
         elif stream_mode == "messages":
             msg_chunk, meta = chunk
             if meta.get("langgraph_node") not in _TEXT_NODES:

@@ -23,6 +23,7 @@ dependencies = [
     "langchain-core>=0.3.28",
     "langchain-google-genai>=2.0.7",
     "langchain-openai>=0.2.14",
+    "composio>=0.13.1",
 ]
 
 [dependency-groups]
