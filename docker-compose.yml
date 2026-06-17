@@ -30,20 +30,18 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # LLM / Composio / Google keys come from backend/.env (the single source of truth).
+    env_file:
+      - path: backend/.env
+        required: false
     environment:
-      # Defaults to the local db container; override in .env to point at Neon.
+      # These are set explicitly so they win over backend/.env for container networking.
+      # Uses the local db container by default; set DATABASE_URL in backend/.env to use Neon
+      # AND remove this line (environment overrides env_file).
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://m32:m32@db:5432/m32}
-      JWT_SECRET: ${JWT_SECRET:-dev-insecure-secret-change-me}
-      LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.0-flash}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
-      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
-      COMPOSIO_API_KEY: ${COMPOSIO_API_KEY:-}
-      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:5173}
-      COOKIE_SAMESITE: ${COOKIE_SAMESITE:-lax}
-      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      FRONTEND_ORIGIN: http://localhost:5173
+      COOKIE_SAMESITE: lax
+      COOKIE_SECURE: "false"
     ports:
       - "8000:8000"
     volumes:

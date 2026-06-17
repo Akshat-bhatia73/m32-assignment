@@ -17,23 +17,26 @@ from app.agents.state import GraphState
 from app.agents.tools import board_tools
 
 EDIT_SYSTEM = (
-    "You translate a user's request into edits on their action-item board.\n"
+    "You translate a user's request into changes on their action-item board.\n"
     "Today is {today}. You are given the current board as a JSON list (each item has an id).\n"
-    "Return a list of edits. For each edit set 'target_id' to the matching item's id and 'op':\n"
-    "- 'update': change fields. Set only the fields that change. For due_date use an ISO date "
-    "(YYYY-MM-DD), resolving relative dates against today. To clear an owner or due_date, set the "
+    "Return a list of edits. For each edit choose 'op':\n"
+    "- 'add': create a NEW action item. Set 'task' (required); optionally 'owner' and 'due_date' "
+    "(ISO YYYY-MM-DD, resolving relative dates against today). Leave 'target_id' empty.\n"
+    "- 'update': change an EXISTING item. Set 'target_id' to the matching item's id and only the "
+    "fields that change. For due_date use an ISO date. To clear an owner or due_date, set the "
     "field to the literal string '__clear__'. Valid status values: open, scheduled, sent, done.\n"
-    "- 'delete': remove the item.\n"
-    "Match items by meaning (task text / owner). If nothing matches, return an empty list."
+    "- 'delete': remove an existing item (set 'target_id').\n"
+    "Match existing items by meaning (task text / owner). If the request asks to create/add a "
+    "task, use 'add'. If nothing is actionable, return an empty list."
 )
 
 
 class BoardEdit(BaseModel):
-    target_id: str = Field(description="id of the item to edit, from the provided board.")
-    op: Literal["update", "delete"]
-    task: str | None = None
-    owner: str | None = Field(default=None, description="New owner, or '__clear__'.")
-    due_date: str | None = Field(default=None, description="ISO date, or '__clear__'.")
+    op: Literal["add", "update", "delete"]
+    target_id: str | None = Field(default=None, description="id of the item to update/delete.")
+    task: str | None = Field(default=None, description="Task text (required for 'add').")
+    owner: str | None = Field(default=None, description="Owner, or '__clear__' to clear.")
+    due_date: str | None = Field(default=None, description="ISO date, or '__clear__' to clear.")
     status: Literal["open", "scheduled", "sent", "done"] | None = None
 
 
@@ -57,11 +60,8 @@ async def edit_node(state: GraphState) -> dict:
 
     writer = get_stream_writer()
     session_id = state["session_id"]
+    user_id = state["user_id"]
     board = board_tools.list_items(session_id)
-
-    if not board:
-        writer({"kind": "say", "text": "Your board is empty, so there's nothing to change yet."})
-        return {}
 
     request = extract_text(state["messages"][-1].content)
     llm = get_llm(temperature=0.0).with_structured_output(EditPlan)
@@ -72,14 +72,27 @@ async def edit_node(state: GraphState) -> dict:
         ]
     )
 
-    updated, deleted = [], []
+    created, updated, deleted = [], [], []
     for edit in plan.edits:
-        if edit.op == "delete":
+        if edit.op == "add":
+            if not edit.task:
+                continue
+            event = board_tools.add_action_item(
+                session_id=session_id,
+                user_id=user_id,
+                meeting_id=None,
+                task=edit.task,
+                owner=edit.owner,
+                due_date=edit.due_date,
+            )
+            writer({"kind": "board", **event})
+            created.append(event)
+        elif edit.op == "delete" and edit.target_id:
             event = board_tools.delete_action_item(edit.target_id)
             if event:
                 writer({"kind": "board", **event})
                 deleted.append(event)
-        else:
+        elif edit.op == "update" and edit.target_id:
             event = board_tools.update_action_item(
                 edit.target_id,
                 task=edit.task,
@@ -91,14 +104,16 @@ async def edit_node(state: GraphState) -> dict:
                 writer({"kind": "board", **event})
                 updated.append(event)
 
-    if not updated and not deleted:
+    if not created and not updated and not deleted:
         writer(
-            {"kind": "say", "text": "I couldn't match that to an item on the board. "
-             "Could you say which task you mean?"}
+            {"kind": "say", "text": "I couldn't tell which item you meant. You can ask me to add a "
+             "new task, or point me at one on the board to change."}
         )
         return {}
 
     parts = []
+    if created:
+        parts.append("Added " + "; ".join(_describe(e) for e in created))
     if updated:
         parts.append("Updated " + "; ".join(_describe(e) for e in updated))
     if deleted:
