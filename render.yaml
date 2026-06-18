@@ -1,0 +1,47 @@
+# Render Blueprint — backend API only (frontend is on Vercel).
+# Import via Render dashboard → New → Blueprint, pointed at this repo.
+# Secret values are marked sync:false: set them in the Render dashboard, never in git.
+services:
+  - type: web
+    name: m32-assignment-api
+    runtime: docker
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    region: oregon
+    healthCheckPath: /health
+    # Run DB migrations before the server starts (free tier has no pre-deploy hook).
+    dockerCommand: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true # Render generates a strong random secret on first deploy
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "10080"
+      - key: LLM_PROVIDER
+        value: gemini
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3.1-flash-lite
+      - key: COMPOSIO_API_KEY
+        sync: false
+      - key: COMPOSIO_TIMEZONE
+        value: Asia/Kolkata
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      # Cross-origin + cookies. Frontend and API are both *.akshat-bhatia.com (same site),
+      # so SameSite=Lax is enough and keeps CSRF protection on. Secure required (HTTPS-only).
+      - key: FRONTEND_ORIGIN
+        value: https://m32-assignment.akshat-bhatia.com
+      - key: COOKIE_SAMESITE
+        value: lax
+      - key: COOKIE_SECURE
+        value: "true"
