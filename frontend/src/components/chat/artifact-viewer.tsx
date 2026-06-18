@@ -8,7 +8,6 @@ import {
   ArtifactContent,
   ArtifactHeader,
 } from "@/components/ai-elements/artifact"
-import { artifactMeta } from "@/lib/artifacts"
 import {
   Dialog,
   DialogClose,
@@ -17,7 +16,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { IconButton } from "@/components/ui/icon-button"
+import { artifactMeta } from "@/lib/artifacts"
 import type { Artifact as ArtifactT } from "@/lib/types"
+
+type PreviewMode = "image" | "pdf" | "text"
+
+function previewMode(a: ArtifactT): PreviewMode {
+  if (a.previewUrl && a.mime?.startsWith("image/")) return "image"
+  if (a.previewUrl && a.mime === "application/pdf") return "pdf"
+  return "text"
+}
 
 export function ArtifactViewer({
   artifact,
@@ -37,26 +45,33 @@ export function ArtifactViewer({
 
   function download() {
     if (!artifact) return
-    const blob = new Blob([artifact.content], { type: "text/plain;charset=utf-8" })
-    const url = URL.createObjectURL(blob)
     const a = document.createElement("a")
-    a.href = url
-    // Images carry transcribed text, so always download the text as .txt.
-    a.download =
-      artifact.kind === "file" && /\.[a-z0-9]+$/i.test(artifact.name)
-        ? artifact.name
-        : `${artifact.name.replace(/\.[a-z0-9]+$/i, "")}.txt`
+    if (artifact.previewUrl && artifact.kind !== "paste") {
+      // Download the original uploaded file.
+      a.href = artifact.previewUrl
+      a.download = artifact.name
+    } else {
+      const blob = new Blob([artifact.content], { type: "text/plain;charset=utf-8" })
+      a.href = URL.createObjectURL(blob)
+      a.download = `${artifact.name.replace(/\.[a-z0-9]+$/i, "")}.txt`
+    }
     document.body.append(a)
     a.click()
     a.remove()
-    URL.revokeObjectURL(url)
   }
+
+  const mode = artifact ? previewMode(artifact) : "text"
+  // The original couldn't be embedded (e.g. .docx, or after a reload that dropped the blob).
+  const noOriginal =
+    artifact != null &&
+    !artifact.previewUrl &&
+    (artifact.mime?.startsWith("image/") || artifact.mime === "application/pdf")
 
   return (
     <Dialog open={!!artifact} onOpenChange={(open) => !open && onClose()}>
       <DialogContent
         showCloseButton={false}
-        className="max-w-2xl gap-0 overflow-hidden rounded-2xl p-0"
+        className="max-w-3xl gap-0 overflow-hidden rounded-2xl p-0"
       >
         {artifact ? (
           <Artifact className="border-0 shadow-none">
@@ -80,7 +95,11 @@ export function ArtifactViewer({
                   {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
                 </IconButton>
                 <IconButton
-                  tooltip="Download as text"
+                  tooltip={
+                    artifact.previewUrl && artifact.kind !== "paste"
+                      ? "Download original"
+                      : "Download as text"
+                  }
                   size="icon-sm"
                   variant="ghost"
                   className="text-muted-foreground"
@@ -88,34 +107,38 @@ export function ArtifactViewer({
                 >
                   <Download className="size-4" />
                 </IconButton>
-                <DialogClose
-                  render={<ArtifactClose className="rounded-full" />}
-                />
+                <DialogClose render={<ArtifactClose className="rounded-full" />} />
               </ArtifactActions>
             </ArtifactHeader>
-            <ArtifactContent className="max-h-[70vh]">
-              {artifact.previewUrl && artifact.kind === "image" ? (
-                <div className="flex flex-col gap-4">
+
+            {mode === "pdf" ? (
+              <iframe
+                src={artifact.previewUrl}
+                title={artifact.name}
+                className="h-[72vh] w-full border-0 bg-muted"
+              />
+            ) : (
+              <ArtifactContent className="max-h-[72vh]">
+                {mode === "image" ? (
                   <img
                     src={artifact.previewUrl}
                     alt={artifact.name}
-                    className="mx-auto max-h-[40vh] rounded-lg border border-border object-contain"
+                    className="mx-auto max-h-[68vh] rounded-lg border border-border object-contain"
                   />
-                  <div>
-                    <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                      Transcribed text
-                    </p>
+                ) : (
+                  <>
+                    {noOriginal ? (
+                      <p className="mb-3 rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
+                        Original preview isn't available here — showing the extracted text.
+                      </p>
+                    ) : null}
                     <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-foreground">
                       {artifact.content}
                     </pre>
-                  </div>
-                </div>
-              ) : (
-                <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-foreground">
-                  {artifact.content}
-                </pre>
-              )}
-            </ArtifactContent>
+                  </>
+                )}
+              </ArtifactContent>
+            )}
           </Artifact>
         ) : null}
       </DialogContent>

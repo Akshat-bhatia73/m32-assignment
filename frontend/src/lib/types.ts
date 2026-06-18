@@ -81,3 +81,10 @@ export type StatusEvent = {
   label: string
   node: string | null
 }
+
+/** Payload of a streamed `data-email-draft` part (a follow-up email awaiting send). */
+export type EmailDraftEvent = {
+  to: string[]
+  subject: string
+  body: string
+}

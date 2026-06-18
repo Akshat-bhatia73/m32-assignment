@@ -1,6 +1,6 @@
 import { useChat } from "@ai-sdk/react"
 import { DefaultChatTransport, type DynamicToolUIPart, type ToolUIPart, type UIMessage } from "ai"
-import { Paperclip, Send, Sparkles } from "lucide-react"
+import { Copy, Paperclip, RotateCcw, Send, Sparkles } from "lucide-react"
 import { type ClipboardEvent, type KeyboardEvent, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 
@@ -12,13 +12,20 @@ import {
 import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message"
 import { ArtifactChip } from "@/components/chat/artifact-chip"
 import { ArtifactViewer } from "@/components/chat/artifact-viewer"
+import { EmailDraftCard } from "@/components/chat/email-draft-card"
 import { ThinkingTrail } from "@/components/chat/thinking-trail"
 import { ToolPartView } from "@/components/chat/tool-part"
 import { IconButton } from "@/components/ui/icon-button"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { api, API_BASE } from "@/lib/api"
-import type { Artifact, ActionItemEvent, SessionTitleEvent, StatusEvent } from "@/lib/types"
+import type {
+  Artifact,
+  ActionItemEvent,
+  EmailDraftEvent,
+  SessionTitleEvent,
+  StatusEvent,
+} from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useBoardStore } from "@/stores/board-store"
 
@@ -36,12 +43,28 @@ const MARKDOWN_CLASS = cn(
   "[&_pre]:my-3 [&_code]:text-[0.85em]"
 )
 
+type MsgMeta = { artifacts?: Artifact[]; createdAt?: string }
+
 function isToolPart(part: UIMessage["parts"][number]): part is ToolUIPart | DynamicToolUIPart {
   return part.type === "dynamic-tool" || part.type.startsWith("tool-")
 }
 
-function messageArtifacts(message: UIMessage): Artifact[] {
-  return (message.metadata as { artifacts?: Artifact[] } | undefined)?.artifacts ?? []
+function meta(message: UIMessage): MsgMeta {
+  return (message.metadata as MsgMeta | undefined) ?? {}
+}
+
+function messageText(message: UIMessage): string {
+  return message.parts
+    .filter((p) => p.type === "text")
+    .map((p) => (p as { text: string }).text)
+    .join("")
+}
+
+function formatTime(iso?: string | null): string {
+  if (!iso) return ""
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ""
+  return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
 }
 
 export function ChatPanel({
@@ -63,30 +86,37 @@ export function ChatPanel({
   const [pending, setPending] = useState<Artifact[]>([])
   const [viewing, setViewing] = useState<Artifact | null>(null)
   const [uploading, setUploading] = useState(false)
+  // Locally captured times for live assistant turns (persisted ones carry metadata.createdAt).
+  const [liveTimes, setLiveTimes] = useState<Record<string, string>>({})
+  // Email-draft cards whose "Send" was clicked — disables the button after one send.
+  const [sentDrafts, setSentDrafts] = useState<Set<string>>(new Set())
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  const { messages, sendMessage, status } = useChat({
+  const { messages, sendMessage, regenerate, status } = useChat({
     id: sessionId,
     messages: initialMessages,
     transport: new DefaultChatTransport({
       api: `${API_BASE}/chat/stream`,
       credentials: "include",
-      prepareSendMessagesRequest: ({ id, messages }) => {
+      prepareSendMessagesRequest: ({ id, messages, trigger }) => {
         const last = messages[messages.length - 1]
-        const text =
-          last?.parts
-            ?.filter((p) => p.type === "text")
-            .map((p) => (p as { text: string }).text)
-            .join("") ?? ""
-        const artifacts = (last ? messageArtifacts(last) : []).map((a) => ({
+        const text = last ? messageText(last) : ""
+        const artifacts = (last ? meta(last).artifacts ?? [] : []).map((a) => ({
           id: a.id,
           name: a.name,
           kind: a.kind,
           content: a.content,
           mime: a.mime ?? null,
         }))
-        return { body: { session_id: id, message: text, artifacts } }
+        return {
+          body: {
+            session_id: id,
+            message: text,
+            artifacts,
+            regenerate: trigger === "regenerate-message",
+          },
+        }
       },
     }),
     onData: (dataPart) => {
@@ -97,8 +127,16 @@ export function ChatPanel({
         onSessionTitle(session_id, title)
       }
     },
-    onFinish: () => onTurnComplete(),
+    onFinish: ({ message }) => {
+      // Stamp a received time on the freshly streamed assistant turn.
+      if (message?.role === "assistant") {
+        setLiveTimes((t) => ({ ...t, [message.id]: new Date().toISOString() }))
+      }
+      onTurnComplete()
+    },
   })
+
+  const busy = status === "submitted" || status === "streaming"
 
   // Backup reconcile: apply any board parts present on the latest assistant message.
   useEffect(() => {
@@ -110,8 +148,6 @@ export function ChatPanel({
       }
     }
   }, [messages, applyEvent])
-
-  const busy = status === "submitted" || status === "streaming"
 
   function addArtifact(a: Artifact) {
     setPending((prev) => [...prev, a])
@@ -129,9 +165,28 @@ export function ChatPanel({
     const text = input.trim()
     if ((!text && pending.length === 0) || busy) return
     clearRecent()
-    sendMessage({ text, metadata: { artifacts: pending } })
+    sendMessage({ text, metadata: { artifacts: pending, createdAt: new Date().toISOString() } })
     setInput("")
     setPending([])
+  }
+
+  function retry(message: UIMessage) {
+    if (busy) return
+    clearRecent()
+    regenerate({ messageId: message.id })
+  }
+
+  async function copyResponse(message: UIMessage) {
+    await navigator.clipboard.writeText(messageText(message))
+    toast.success("Copied response")
+  }
+
+  // Confirm + send an email draft card — routes to the confirm node, which sends via Gmail.
+  function sendEmailDraft(messageId: string) {
+    if (busy) return
+    setSentDrafts((s) => new Set(s).add(messageId))
+    clearRecent()
+    sendMessage({ text: "Send it", metadata: { createdAt: new Date().toISOString() } })
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -145,12 +200,7 @@ export function ChatPanel({
     const text = e.clipboardData.getData("text")
     if (text.length >= PASTE_ARTIFACT_CHARS) {
       e.preventDefault()
-      addArtifact({
-        id: crypto.randomUUID(),
-        name: "Pasted text",
-        kind: "paste",
-        content: text,
-      })
+      addArtifact({ id: crypto.randomUUID(), name: "Pasted text", kind: "paste", content: text })
       toast.success("Captured pasted text as an attachment", {
         description: "Open it any time, or send to extract action items.",
       })
@@ -171,7 +221,8 @@ export function ChatPanel({
         kind: isImage ? "image" : "file",
         content: res.text,
         mime: file.type || null,
-        previewUrl: isImage ? URL.createObjectURL(file) : undefined,
+        // Keep an object URL to the original so the viewer can preview the real file.
+        previewUrl: URL.createObjectURL(file),
       })
       toast.success(isImage ? "Transcribed screenshot" : `Attached ${res.filename}`, {
         description: "Open it to review, or send to extract action items.",
@@ -187,6 +238,7 @@ export function ChatPanel({
 
   const waiting = status === "submitted"
   const canSend = (input.trim().length > 0 || pending.length > 0) && !busy
+  const lastIndex = messages.length - 1
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -203,62 +255,109 @@ export function ChatPanel({
           ) : (
             messages.map((message, mi) => {
               const isAssistant = message.role === "assistant"
-              const isLastStreaming = mi === messages.length - 1 && busy
+              const isLast = mi === lastIndex
+              const isStreaming = isLast && busy
               const statuses = message.parts
                 .filter((p) => p.type === "data-status")
                 .map((p) => (p as { data: StatusEvent }).data)
-              const artifacts = messageArtifacts(message)
+              const artifacts = meta(message).artifacts ?? []
+              const time = formatTime(meta(message).createdAt ?? liveTimes[message.id])
+              const hasText = messageText(message).length > 0
+              const emailPart = message.parts.find((p) => p.type === "data-email-draft")
+              const emailDraft = emailPart
+                ? (emailPart as { data: EmailDraftEvent }).data
+                : undefined
+              // Only show the bubble when it has something inside it — a text-only
+              // attachment (paste/upload with no typed message) shows just the chip.
+              const hasBubble =
+                hasText ||
+                !!emailDraft ||
+                message.parts.some(isToolPart) ||
+                (isAssistant && statuses.length > 0)
               return (
-                <Message
+                <div
                   key={message.id}
-                  from={message.role}
-                  className={cn(isAssistant && "flex-row items-start gap-3")}
+                  className={cn("flex flex-col gap-1.5", isAssistant ? "items-start" : "items-end")}
                 >
-                  {isAssistant ? (
-                    <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
-                      <Sparkles className="size-3.5" />
+                  {hasBubble ? (
+                    <Message from={message.role}>
+                      <MessageContent>
+                        {isAssistant && statuses.length > 0 ? (
+                          <ThinkingTrail steps={statuses} active={isStreaming} />
+                        ) : null}
+                        {message.parts.map((part, i) => {
+                          if (part.type === "text") {
+                            // The card carries the draft; hide its plain-text twin.
+                            if (!part.text || emailDraft) return null
+                            return (
+                              <MessageResponse key={i} className={MARKDOWN_CLASS}>
+                                {part.text}
+                              </MessageResponse>
+                            )
+                          }
+                          if (isToolPart(part)) {
+                            return <ToolPartView key={i} part={part} />
+                          }
+                          return null
+                        })}
+                        {emailDraft ? (
+                          <EmailDraftCard
+                            draft={emailDraft}
+                            sent={sentDrafts.has(message.id)}
+                            busy={busy}
+                            onSend={() => sendEmailDraft(message.id)}
+                          />
+                        ) : null}
+                      </MessageContent>
+                    </Message>
+                  ) : null}
+
+                  {artifacts.length > 0 ? (
+                    <div className={cn("flex flex-wrap gap-2", !isAssistant && "justify-end")}>
+                      {artifacts.map((a) => (
+                        <ArtifactChip key={a.id} artifact={a} onOpen={setViewing} />
+                      ))}
                     </div>
                   ) : null}
-                  <MessageContent className={cn(isAssistant && "min-w-0 flex-1")}>
-                    {isAssistant && statuses.length > 0 ? (
-                      <ThinkingTrail steps={statuses} active={isLastStreaming} />
-                    ) : null}
-                    {artifacts.length > 0 ? (
-                      <div className="flex flex-wrap gap-2 group-[.is-user]:justify-end">
-                        {artifacts.map((a) => (
-                          <ArtifactChip key={a.id} artifact={a} onOpen={setViewing} />
-                        ))}
-                      </div>
-                    ) : null}
-                    {message.parts.map((part, i) => {
-                      if (part.type === "text") {
-                        if (!part.text) return null
-                        return (
-                          <MessageResponse key={i} className={MARKDOWN_CLASS}>
-                            {part.text}
-                          </MessageResponse>
-                        )
-                      }
-                      if (isToolPart(part)) {
-                        return <ToolPartView key={i} part={part} />
-                      }
-                      return null
-                    })}
-                  </MessageContent>
-                </Message>
+
+                  {!isStreaming && (time || (isAssistant && hasText)) ? (
+                    <div className="flex items-center gap-0.5 px-1 text-muted-foreground">
+                      {time ? <span className="text-xs">{time}</span> : null}
+                      {isAssistant && hasText ? (
+                        <>
+                          <IconButton
+                            tooltip="Copy response"
+                            size="icon-xs"
+                            variant="ghost"
+                            className="text-muted-foreground"
+                            onClick={() => copyResponse(message)}
+                          >
+                            <Copy className="size-3.5" />
+                          </IconButton>
+                          {isLast ? (
+                            <IconButton
+                              tooltip="Retry"
+                              size="icon-xs"
+                              variant="ghost"
+                              className="text-muted-foreground"
+                              onClick={() => retry(message)}
+                            >
+                              <RotateCcw className="size-3.5" />
+                            </IconButton>
+                          ) : null}
+                        </>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
               )
             })
           )}
           {waiting ? (
-            <div className="flex items-center gap-3">
-              <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
-                <Sparkles className="size-3.5" />
-              </div>
-              <span className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Spinner className="size-3.5" />
-                Thinking…
-              </span>
-            </div>
+            <span className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Spinner className="size-3.5" />
+              Thinking…
+            </span>
           ) : null}
         </ConversationContent>
         <ConversationScrollButton />
@@ -315,12 +414,7 @@ export function ChatPanel({
               }
               className="max-h-40 min-h-9 flex-1 resize-none self-center border-0 bg-transparent px-1 py-1.5 shadow-none focus-visible:ring-0 dark:bg-transparent"
             />
-            <IconButton
-              tooltip="Send"
-              type="submit"
-              className="size-9 shrink-0"
-              disabled={!canSend}
-            >
+            <IconButton tooltip="Send" type="submit" className="size-9 shrink-0" disabled={!canSend}>
               {busy ? <Spinner className="size-4" /> : <Send className="size-4" />}
             </IconButton>
           </div>

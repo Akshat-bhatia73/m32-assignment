@@ -119,6 +119,10 @@ async def comms_node(state: GraphState) -> dict:
         session_id,
         {"type": "send_email", "to": to, "subject": draft.subject, "body": draft.body},
     )
+    # Structured part → the client renders an editable email card with a "Send" action.
+    writer({"kind": "email_draft", "to": to, "subject": draft.subject, "body": draft.body})
+    # Plain-text twin: persisted for history and shown as a graceful fallback on reload
+    # (when the data part isn't replayed). The client hides it while the card is present.
     writer(
         {"kind": "say", "text": "Here's a draft follow-up:\n\n"
          f"To: {', '.join(to)}\nSubject: {draft.subject}\n\n{draft.body}\n\n"

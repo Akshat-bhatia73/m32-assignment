@@ -1,6 +1,7 @@
-import { LayoutGrid, MoreHorizontal, Plus, Trash2 } from "lucide-react"
-import { NavLink } from "react-router-dom"
+import { CheckSquare, LayoutGrid, LogOut, MoreHorizontal, Plus, Trash2 } from "lucide-react"
+import { NavLink, useNavigate } from "react-router-dom"
 
+import { ThemeToggle } from "@/components/layout/theme-toggle"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -8,7 +9,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { IconButton } from "@/components/ui/icon-button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { useCurrentUser, useLogout } from "@/hooks/use-auth"
 import { cn } from "@/lib/utils"
 import type { Session } from "@/lib/types"
 
@@ -39,23 +42,39 @@ export function SessionSidebar({
   onDelete: (id: string) => void
   className?: string
 }) {
+  const { data: user } = useCurrentUser()
+  const logout = useLogout()
+  const navigate = useNavigate()
+  const label = user?.name || user?.email || ""
+
   return (
     <div className={cn("flex h-full flex-col bg-sidebar text-sidebar-foreground", className)}>
-      <div className="flex h-[3.75rem] shrink-0 items-center border-b border-sidebar-border px-3">
+      {/* Brand — replaces the old global top bar. */}
+      <div className="flex h-[3.75rem] shrink-0 items-center gap-2 border-b border-sidebar-border px-4">
+        <div className="flex size-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
+          <CheckSquare className="size-4" />
+        </div>
+        <div className="leading-tight">
+          <p className="text-sm font-semibold text-foreground">Meeting → Done</p>
+          <p className="text-xs text-muted-foreground">Ops Copilot</p>
+        </div>
+      </div>
+
+      <div className="shrink-0 p-3">
         <Button className="w-full justify-center gap-2" onClick={onNew}>
           <Plus className="size-4" />
           New meeting
         </Button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 py-3">
+      <div className="min-h-0 flex-1 overflow-y-auto px-2">
         <p className="px-2 pb-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
           Meetings
         </p>
         {sessions.length === 0 ? (
           <p className="px-2 py-2 text-sm text-muted-foreground">No meetings yet.</p>
         ) : (
-          <ul className="flex flex-col gap-0.5">
+          <ul className="flex flex-col gap-0.5 pb-2">
             {sessions.map((s) => {
               const active = s.id === currentId
               return (
@@ -118,7 +137,7 @@ export function SessionSidebar({
         )}
       </div>
 
-      <div className="shrink-0 border-t border-sidebar-border p-2">
+      <div className="shrink-0 space-y-1 border-t border-sidebar-border p-2">
         <NavLink
           to="/overview"
           className={({ isActive }) =>
@@ -133,6 +152,23 @@ export function SessionSidebar({
           <LayoutGrid className="size-4" />
           All action items
         </NavLink>
+
+        <div className="flex items-center gap-2 rounded-lg px-2.5 py-1.5">
+          <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium uppercase text-muted-foreground">
+            {label.charAt(0) || "?"}
+          </div>
+          <span className="min-w-0 flex-1 truncate text-sm text-foreground">{label}</span>
+          <ThemeToggle />
+          <IconButton
+            tooltip="Sign out"
+            variant="ghost"
+            size="icon-sm"
+            disabled={logout.isPending}
+            onClick={() => logout.mutate(undefined, { onSuccess: () => navigate("/login") })}
+          >
+            <LogOut className="size-4" />
+          </IconButton>
+        </div>
       </div>
     </div>
   )

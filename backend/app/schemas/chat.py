@@ -46,3 +46,6 @@ class ChatRequest(BaseModel):
     session_id: uuid.UUID
     message: str
     artifacts: list[Artifact] = []
+    # When true, re-run the last user turn and replace the last assistant reply (retry),
+    # rather than recording a new user message.
+    regenerate: bool = False

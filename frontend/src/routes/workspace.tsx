@@ -5,7 +5,6 @@ import { useSearchParams } from "react-router-dom"
 
 import { ActionBoard } from "@/components/board/action-board"
 import { ChatPanel } from "@/components/chat/chat-panel"
-import { AppHeader } from "@/components/layout/app-header"
 import { SessionSidebar } from "@/components/layout/session-sidebar"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -21,8 +20,8 @@ function toUIMessages(messages: ChatMessage[]): UIMessage[] {
       id: m.id,
       role: m.role as "user" | "assistant",
       parts: [{ type: "text", text: m.content }],
-      // Rehydrate attachment chips for past turns.
-      metadata: m.artifacts?.length ? { artifacts: m.artifacts } : undefined,
+      // Rehydrate attachment chips + sent time for past turns.
+      metadata: { createdAt: m.created_at, artifacts: m.artifacts ?? undefined },
     }))
 }
 
@@ -126,8 +125,6 @@ export function WorkspacePage() {
 
   return (
     <div className="flex h-svh flex-col bg-background">
-      <AppHeader />
-
       {/* mobile pane switch */}
       <div className="flex shrink-0 items-center gap-1 border-b border-border bg-card p-2 md:hidden">
         {(["sessions", "chat", "board"] as MobilePane[]).map((pane) => (

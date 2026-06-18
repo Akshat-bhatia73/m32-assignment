@@ -36,21 +36,40 @@ def chat_stream(
     else:
         agent_input = display_text
 
-    # Persist the user turn first so it survives a dropped connection.
-    user_msg = Message(
-        session_id=session.id,
-        role="user",
-        content=display_text,
-        artifacts=[a.model_dump() for a in payload.artifacts] or None,
-    )
-    db.add(user_msg)
-    db.commit()
+    if payload.regenerate:
+        # Retry: drop the previous assistant reply and reuse the existing last user turn.
+        last_assistant = db.scalars(
+            select(Message)
+            .where(Message.session_id == session.id, Message.role == "assistant")
+            .order_by(Message.created_at.desc())
+        ).first()
+        if last_assistant is not None:
+            db.delete(last_assistant)
+            db.commit()
+        rows = db.scalars(
+            select(Message).where(Message.session_id == session.id).order_by(Message.created_at)
+        ).all()
+        # Exclude the trailing user message — it's the turn we're re-running.
+        history = [
+            (m.role, m.content)
+            for m in (rows[:-1] if rows and rows[-1].role == "user" else rows)
+        ]
+    else:
+        # Persist the user turn first so it survives a dropped connection.
+        user_msg = Message(
+            session_id=session.id,
+            role="user",
+            content=display_text,
+            artifacts=[a.model_dump() for a in payload.artifacts] or None,
+        )
+        db.add(user_msg)
+        db.commit()
 
-    # Load prior turns for in-session memory (exclude the one we just added at the tail).
-    rows = db.scalars(
-        select(Message).where(Message.session_id == session.id).order_by(Message.created_at)
-    ).all()
-    history = [(m.role, m.content) for m in rows if m.id != user_msg.id]
+        # Load prior turns for in-session memory (exclude the one we just added at the tail).
+        rows = db.scalars(
+            select(Message).where(Message.session_id == session.id).order_by(Message.created_at)
+        ).all()
+        history = [(m.role, m.content) for m in rows if m.id != user_msg.id]
     # Name the session from its first turn so the sidebar reads meaningfully.
     needs_title = not history and (session.title or "").strip() in _DEFAULT_TITLES
     session_id = session.id

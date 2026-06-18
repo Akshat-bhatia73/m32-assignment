@@ -1,10 +1,10 @@
 import { useQuery } from "@tanstack/react-query"
-import { ArrowRight, CalendarDays, ClipboardList, User } from "lucide-react"
+import { ArrowLeft, ArrowRight, CalendarDays, ClipboardList, User } from "lucide-react"
 import { useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 
-import { AppHeader } from "@/components/layout/app-header"
 import { StatusBadge } from "@/components/board/status-badge"
+import { ThemeToggle } from "@/components/layout/theme-toggle"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { api } from "@/lib/api"
@@ -60,15 +60,25 @@ export function OverviewPage() {
 
   return (
     <div className="flex h-svh flex-col bg-background">
-      <AppHeader />
-
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-3xl px-4 py-6">
-          <div className="mb-4">
-            <h1 className="text-lg font-semibold text-foreground">All action items</h1>
-            <p className="text-sm text-muted-foreground">
-              Every task across your meetings, in one place.
-            </p>
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="-ml-2 mb-1 gap-1.5 text-muted-foreground"
+                onClick={() => navigate("/")}
+              >
+                <ArrowLeft className="size-4" />
+                Back to workspace
+              </Button>
+              <h1 className="text-lg font-semibold text-foreground">All action items</h1>
+              <p className="text-sm text-muted-foreground">
+                Every task across your meetings, in one place.
+              </p>
+            </div>
+            <ThemeToggle />
           </div>
 
           <div className="mb-5 flex flex-wrap gap-1.5">

@@ -156,6 +156,11 @@ async def stream_agent(
                 yield ai_stream.sse(
                     ai_stream.data_part("action-item", item, part_id=item["id"])
                 ), None
+            elif kind == "email_draft":
+                draft = {k: v for k, v in chunk.items() if k != "kind"}
+                yield ai_stream.sse(
+                    ai_stream.data_part("email-draft", draft, part_id=uuid.uuid4().hex)
+                ), None
             elif kind == "say":
                 # Deterministic assistant text from a node (edits / drafts / confirmations).
                 if not text_open:
