@@ -67,7 +67,7 @@ export function SettingsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85svh] gap-4 overflow-y-auto sm:max-w-lg">
+      <DialogContent className="flex max-h-[85svh] w-full flex-col gap-4 overflow-x-hidden overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Settings</DialogTitle>
           <DialogDescription>
