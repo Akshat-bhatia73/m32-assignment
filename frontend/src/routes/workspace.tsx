@@ -19,7 +19,12 @@ function toUIMessages(messages: ChatMessage[]): UIMessage[] {
     .map((m) => ({
       id: m.id,
       role: m.role as "user" | "assistant",
-      parts: [{ type: "text", text: m.content }],
+      parts: [
+        { type: "text", text: m.content },
+        // Replay structured cards (email draft / calendar proposal) so a reloaded turn renders
+        // them as cards, not just the plain-text twin.
+        ...(m.data_parts ?? []).map((p) => ({ type: `data-${p.type}`, data: p.data })),
+      ] as UIMessage["parts"],
       // Rehydrate attachment chips + sent time for past turns.
       metadata: { createdAt: m.created_at, artifacts: m.artifacts ?? undefined },
     }))

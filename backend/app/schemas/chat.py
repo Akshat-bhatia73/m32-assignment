@@ -32,6 +32,13 @@ class Artifact(BaseModel):
     mime: str | None = None
 
 
+class DataPart(BaseModel):
+    """A structured stream part persisted for replay on reload (e.g. an email draft card)."""
+
+    type: str
+    data: dict
+
+
 class MessageOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -39,6 +46,7 @@ class MessageOut(BaseModel):
     role: str
     content: str
     artifacts: list[Artifact] | None = None
+    data_parts: list[DataPart] | None = None
     created_at: datetime
 
 

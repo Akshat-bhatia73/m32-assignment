@@ -23,11 +23,18 @@ export type Artifact = {
   previewUrl?: string
 }
 
+/** A structured stream part persisted with a message, replayed as a card on reload. */
+export type PersistedDataPart = {
+  type: string // e.g. "email-draft" | "calendar-proposal"
+  data: unknown
+}
+
 export type ChatMessage = {
   id: string
   role: "user" | "assistant" | "tool"
   content: string
   artifacts?: Artifact[] | null
+  data_parts?: PersistedDataPart[] | null
   created_at: string
 }
 

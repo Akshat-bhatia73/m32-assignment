@@ -81,6 +81,7 @@ def chat_stream(
 
     async def generator() -> AsyncGenerator[str, None]:
         assistant_text = ""
+        assistant_parts: list[dict] = []
         title_part: str | None = None
         if needs_title:
             title = await generate_title(agent_input)
@@ -104,7 +105,8 @@ def chat_stream(
                 members=members,
             ):
                 if final is not None:
-                    assistant_text = final
+                    assistant_text = final["text"]
+                    assistant_parts = final["data_parts"]
                 yield chunk
                 # Emit the new title right after the message envelope's `start` part.
                 if title_part and not started:
@@ -116,7 +118,12 @@ def chat_stream(
         finally:
             if assistant_text:
                 db.add(
-                    Message(session_id=session.id, role="assistant", content=assistant_text)
+                    Message(
+                        session_id=session.id,
+                        role="assistant",
+                        content=assistant_text,
+                        data_parts=assistant_parts or None,
+                    )
                 )
                 db.commit()
 

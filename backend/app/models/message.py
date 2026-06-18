@@ -21,5 +21,8 @@ class Message(UUIDMixin, TimestampMixin, Base):
     content: Mapped[str] = mapped_column(Text)
     # Attachments sent with this turn (uploaded files / long pasted blobs), each {id,name,kind,...}.
     artifacts: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)
+    # Structured stream parts to replay on reload (email draft / calendar proposal cards), each
+    # {type, data}. Without these, a reloaded turn would render only the plain-text twin.
+    data_parts: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)
 
     session: Mapped["ChatSession"] = relationship(back_populates="messages")  # noqa: F821

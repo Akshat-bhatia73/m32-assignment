@@ -82,7 +82,7 @@ def _initial_messages(history: list[tuple[str, str]], new_message: str) -> list[
     return msgs
 
 
-async def _echo(new_message: str) -> AsyncGenerator[tuple[str, str | None], None]:
+async def _echo(new_message: str) -> AsyncGenerator[tuple[str, dict | None], None]:
     """No-key fallback so the stream is testable without an LLM provider."""
     text_id = uuid.uuid4().hex
     yield ai_stream.sse(ai_stream.start()), None
@@ -95,7 +95,7 @@ async def _echo(new_message: str) -> AsyncGenerator[tuple[str, str | None], None
         yield ai_stream.sse(ai_stream.text_delta(text_id, word + " ")), None
     yield ai_stream.sse(ai_stream.text_end(text_id)), None
     yield ai_stream.sse(ai_stream.finish()), None
-    yield ai_stream.done(), full
+    yield ai_stream.done(), {"text": full, "data_parts": []}
 
 
 async def stream_agent(
@@ -107,10 +107,11 @@ async def stream_agent(
     user_email: str | None = None,
     org_id: uuid.UUID | None = None,
     members: list[dict] | None = None,
-) -> AsyncGenerator[tuple[str, str | None], None]:
-    """Yield (sse_chunk, final_assistant_text|None) pairs.
+) -> AsyncGenerator[tuple[str, dict | None], None]:
+    """Yield (sse_chunk, final|None) pairs.
 
-    The final tuple carries the full assistant text so the caller can persist it.
+    The final tuple carries ``{"text", "data_parts"}`` so the caller can persist the assistant
+    text plus any structured cards (email draft / calendar proposal) to replay on reload.
     """
     if not has_llm():
         async for pair in _echo(new_message):
@@ -132,6 +133,7 @@ async def stream_agent(
     text_id = uuid.uuid4().hex
     text_open = False
     full_text = ""
+    persist_parts: list[dict] = []  # structured cards to persist for reload
 
     yield ai_stream.sse(ai_stream.start()), None
 
@@ -162,11 +164,13 @@ async def stream_agent(
                 ), None
             elif kind == "email_draft":
                 draft = {k: v for k, v in chunk.items() if k != "kind"}
+                persist_parts.append({"type": "email-draft", "data": draft})
                 yield ai_stream.sse(
                     ai_stream.data_part("email-draft", draft, part_id=uuid.uuid4().hex)
                 ), None
             elif kind == "calendar_proposal":
                 proposal = {k: v for k, v in chunk.items() if k != "kind"}
+                persist_parts.append({"type": "calendar-proposal", "data": proposal})
                 yield ai_stream.sse(
                     ai_stream.data_part("calendar-proposal", proposal, part_id=uuid.uuid4().hex)
                 ), None
@@ -194,4 +198,4 @@ async def stream_agent(
     if text_open:
         yield ai_stream.sse(ai_stream.text_end(text_id)), None
     yield ai_stream.sse(ai_stream.finish()), None
-    yield ai_stream.done(), full_text
+    yield ai_stream.done(), {"text": full_text, "data_parts": persist_parts}
