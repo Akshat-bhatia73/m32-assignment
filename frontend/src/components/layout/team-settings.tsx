@@ -1,9 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Check, Crown, Pencil, Send, Trash2, UserPlus, X } from "lucide-react"
+import { Check, Crown, LogOut, Pencil, Send, Trash2, UserPlus, X } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { IconButton } from "@/components/ui/icon-button"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
@@ -96,7 +105,95 @@ export function TeamSettings({ open }: { open: boolean }) {
       ) : null}
 
       {isOwner ? <InviteForm atCap={atCap} onInvited={setOrg} /> : null}
+
+      {isOwner && org.members.length <= 1 ? null : <LeaveWorkspace orgName={org.name} />}
     </section>
+  )
+}
+
+function LeaveWorkspace({ orgName }: { orgName: string }) {
+  const queryClient = useQueryClient()
+  const [confirming, setConfirming] = useState(false)
+  const [text, setText] = useState("")
+  const phrase = `Leave ${orgName}.`
+  const matches = text.trim() === phrase
+
+  const leave = useMutation({
+    mutationFn: api.leaveOrg,
+    onSuccess: (next) => {
+      queryClient.setQueryData(["org"], next)
+      // Leaving switches workspaces — refresh everything scoped to the org.
+      queryClient.invalidateQueries({ queryKey: ["sessions"] })
+      queryClient.invalidateQueries({ queryKey: ["actions"] })
+      queryClient.invalidateQueries({ queryKey: ["calendar-events"] })
+      setConfirming(false)
+      setText("")
+      toast.success("You left the workspace", { description: `You're now in “${next.name}”.` })
+    },
+    onError: (err) =>
+      toast.error("Couldn't leave", {
+        description: err instanceof ApiError ? err.message : "Please try again.",
+      }),
+  })
+
+  if (!confirming) {
+    return (
+      <div className="border-t border-border pt-3">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-destructive hover:text-destructive"
+          onClick={() => setConfirming(true)}
+        >
+          <LogOut className="size-4" />
+          Leave workspace
+        </Button>
+      </div>
+    )
+  }
+
+  return (
+    <form
+      className="space-y-2 border-t border-border pt-3"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (matches) leave.mutate()
+      }}
+    >
+      <p className="text-sm text-muted-foreground">
+        To confirm, type{" "}
+        <span className="font-medium text-foreground">{phrase}</span> below.
+      </p>
+      <Input
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder={phrase}
+        autoFocus
+        aria-label="Confirm leaving the workspace"
+      />
+      <div className="flex justify-end gap-2">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            setConfirming(false)
+            setText("")
+          }}
+        >
+          Cancel
+        </Button>
+        <Button
+          type="submit"
+          variant="destructive"
+          size="sm"
+          disabled={!matches || leave.isPending}
+        >
+          {leave.isPending ? <Spinner className="size-4" /> : <LogOut className="size-4" />}
+          Leave workspace
+        </Button>
+      </div>
+    </form>
   )
 }
 
@@ -241,25 +338,49 @@ function RemoveMember({
   label: string
   onDone: (org: Org) => void
 }) {
+  const [open, setOpen] = useState(false)
   const mut = useMutation({
     mutationFn: () => api.removeMember(id),
     onSuccess: (next) => {
       onDone(next)
+      setOpen(false)
       toast.success(`Removed ${label}`)
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Couldn't remove"),
   })
   return (
-    <IconButton
-      tooltip="Remove member"
-      size="icon-sm"
-      variant="ghost"
-      className="text-muted-foreground"
-      disabled={mut.isPending}
-      onClick={() => mut.mutate()}
-    >
-      {mut.isPending ? <Spinner className="size-4" /> : <Trash2 className="size-4" />}
-    </IconButton>
+    <Dialog open={open} onOpenChange={setOpen}>
+      <IconButton
+        tooltip="Remove member"
+        size="icon-sm"
+        variant="ghost"
+        className="text-muted-foreground"
+        onClick={() => setOpen(true)}
+      >
+        <Trash2 className="size-4" />
+      </IconButton>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Remove member?</DialogTitle>
+          <DialogDescription>
+            Remove <span className="font-medium text-foreground">{label}</span> from this workspace?
+            They'll lose access to its meetings and action board.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <DialogClose render={<Button variant="outline" size="sm" />}>Cancel</DialogClose>
+          <Button
+            variant="destructive"
+            size="sm"
+            disabled={mut.isPending}
+            onClick={() => mut.mutate()}
+          >
+            {mut.isPending ? <Spinner className="size-4" /> : <Trash2 className="size-4" />}
+            Remove
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 

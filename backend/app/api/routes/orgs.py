@@ -155,16 +155,54 @@ def revoke_invite(
     return _org_out(db, _get_org(db, membership), membership)
 
 
-@router.delete("/members/{member_id}", response_model=OrgOut)
+@router.delete("/members/{user_id}", response_model=OrgOut)
 def remove_member(
-    member_id: uuid.UUID, membership: CurrentMembership, db: DbSession
+    user_id: uuid.UUID, membership: CurrentMembership, db: DbSession
 ) -> OrgOut:
     _require_owner(membership)
-    target = db.get(Membership, member_id)
-    if target is None or target.org_id != membership.org_id:
+    # The roster exposes each member's *user* id, so look the membership up by (org, user).
+    target = db.scalar(
+        select(Membership).where(
+            Membership.org_id == membership.org_id, Membership.user_id == user_id
+        )
+    )
+    if target is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Member not found")
     if target.role == "owner":
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "You can't remove the workspace owner.")
     db.delete(target)
     db.commit()
     return _org_out(db, _get_org(db, membership), membership)
+
+
+@router.post("/leave", response_model=OrgOut)
+def leave_org(current_user: CurrentUser, membership: CurrentMembership, db: DbSession) -> OrgOut:
+    """Leave the current workspace. The caller is moved to a fresh personal workspace.
+
+    If the leaver is the owner, ownership transfers to the longest-standing other member; an owner
+    who is the sole member can't leave (there's nothing to hand off to).
+    """
+    org = _get_org(db, membership)
+    others = list(
+        db.scalars(
+            select(Membership)
+            .where(Membership.org_id == org.id, Membership.user_id != current_user.id)
+            .order_by(Membership.created_at)
+        )
+    )
+    if membership.role == "owner":
+        if not others:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "You're the only member, so there's no one to hand the workspace to.",
+            )
+        # Promote the longest-standing remaining member to owner.
+        heir = others[0]
+        heir.role = "owner"
+        org.owner_user_id = heir.user_id
+
+    db.delete(membership)
+    db.commit()
+    # Give the leaver their own workspace again so they're never orgless.
+    new_membership = orgs.ensure_membership(db, current_user)
+    return _org_out(db, _get_org(db, new_membership), new_membership)

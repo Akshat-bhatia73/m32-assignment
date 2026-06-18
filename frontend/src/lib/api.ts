@@ -81,7 +81,8 @@ export const api = {
   createInvite: (body: { email: string; name?: string }) =>
     request<Org>("/org/invites", { method: "POST", body: JSON.stringify(body) }),
   revokeInvite: (id: string) => request<Org>(`/org/invites/${id}`, { method: "DELETE" }),
-  removeMember: (id: string) => request<Org>(`/org/members/${id}`, { method: "DELETE" }),
+  removeMember: (userId: string) => request<Org>(`/org/members/${userId}`, { method: "DELETE" }),
+  leaveOrg: () => request<Org>("/org/leave", { method: "POST" }),
 
   extractTranscript: async (file: File): Promise<ExtractedTranscript> => {
     const form = new FormData()
