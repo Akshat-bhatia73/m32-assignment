@@ -12,6 +12,7 @@ import {
 import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message"
 import { ArtifactChip } from "@/components/chat/artifact-chip"
 import { ArtifactViewer } from "@/components/chat/artifact-viewer"
+import { CalendarProposalCard } from "@/components/chat/calendar-proposal-card"
 import { EmailDraftCard } from "@/components/chat/email-draft-card"
 import { ThinkingTrail } from "@/components/chat/thinking-trail"
 import { ToolPartView } from "@/components/chat/tool-part"
@@ -22,6 +23,7 @@ import { api, API_BASE } from "@/lib/api"
 import type {
   Artifact,
   ActionItemEvent,
+  CalendarProposalEvent,
   EmailDraftEvent,
   SessionTitleEvent,
   StatusEvent,
@@ -90,6 +92,8 @@ export function ChatPanel({
   const [liveTimes, setLiveTimes] = useState<Record<string, string>>({})
   // Email-draft cards whose "Send" was clicked — disables the button after one send.
   const [sentDrafts, setSentDrafts] = useState<Set<string>>(new Set())
+  // Calendar-proposal cards whose "Add" was clicked — disables the button after one confirm.
+  const [confirmedProposals, setConfirmedProposals] = useState<Set<string>>(new Set())
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -189,6 +193,14 @@ export function ChatPanel({
     sendMessage({ text: "Send it", metadata: { createdAt: new Date().toISOString() } })
   }
 
+  // Confirm a calendar proposal card — routes to the confirm node, which creates the events.
+  function confirmProposal(messageId: string) {
+    if (busy) return
+    setConfirmedProposals((s) => new Set(s).add(messageId))
+    clearRecent()
+    sendMessage({ text: "Yes", metadata: { createdAt: new Date().toISOString() } })
+  }
+
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
@@ -267,11 +279,16 @@ export function ChatPanel({
               const emailDraft = emailPart
                 ? (emailPart as { data: EmailDraftEvent }).data
                 : undefined
+              const proposalPart = message.parts.find((p) => p.type === "data-calendar-proposal")
+              const proposal = proposalPart
+                ? (proposalPart as { data: CalendarProposalEvent }).data
+                : undefined
               // Only show the bubble when it has something inside it — a text-only
               // attachment (paste/upload with no typed message) shows just the chip.
               const hasBubble =
                 hasText ||
                 !!emailDraft ||
+                !!proposal ||
                 message.parts.some(isToolPart) ||
                 (isAssistant && statuses.length > 0)
               return (
@@ -287,8 +304,8 @@ export function ChatPanel({
                         ) : null}
                         {message.parts.map((part, i) => {
                           if (part.type === "text") {
-                            // The card carries the draft; hide its plain-text twin.
-                            if (!part.text || emailDraft) return null
+                            // The card carries the draft/proposal; hide its plain-text twin.
+                            if (!part.text || emailDraft || proposal) return null
                             return (
                               <MessageResponse key={i} className={MARKDOWN_CLASS}>
                                 {part.text}
@@ -306,6 +323,14 @@ export function ChatPanel({
                             sent={sentDrafts.has(message.id)}
                             busy={busy}
                             onSend={() => sendEmailDraft(message.id)}
+                          />
+                        ) : null}
+                        {proposal ? (
+                          <CalendarProposalCard
+                            proposal={proposal}
+                            confirmed={confirmedProposals.has(message.id)}
+                            busy={busy}
+                            onConfirm={() => confirmProposal(message.id)}
                           />
                         ) : null}
                       </MessageContent>

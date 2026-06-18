@@ -94,3 +94,32 @@ export type IntegrationStatus = {
   gmail: boolean
   googlecalendar: boolean
 }
+
+/** A normalized Google Calendar event for the sidebar agenda. */
+export type CalendarEvent = {
+  id: string
+  summary: string
+  start: string | null
+  end: string | null
+  all_day: boolean
+}
+
+export type CalendarEventsResponse = {
+  connected: boolean
+  events: CalendarEvent[]
+}
+
+/** One proposed calendar event in a `data-calendar-proposal` part. */
+export type CalendarProposalItem = {
+  summary: string
+  date: string
+  /** ISO start the event would occupy (date + default 9:00 block). */
+  start: string
+  /** Title of an existing event this would collide with, if any. */
+  conflict: string | null
+}
+
+/** Payload of a streamed `data-calendar-proposal` part (events awaiting confirmation). */
+export type CalendarProposalEvent = {
+  events: CalendarProposalItem[]
+}

@@ -1,6 +1,7 @@
 import type {
   ActionItem,
   ActionItemWithSession,
+  CalendarEventsResponse,
   ChatMessage,
   ExtractedTranscript,
   IntegrationStatus,
@@ -69,6 +70,9 @@ export const api = {
   getIntegrations: () => request<IntegrationStatus>("/integrations/status"),
   connectIntegration: (toolkit: string) =>
     request<{ url: string }>(`/integrations/${toolkit}/connect`, { method: "POST" }),
+
+  getCalendarEvents: (days = 7) =>
+    request<CalendarEventsResponse>(`/calendar/events?days=${days}`),
 
   extractTranscript: async (file: File): Promise<ExtractedTranscript> => {
     const form = new FormData()

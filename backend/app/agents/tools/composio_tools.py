@@ -12,6 +12,7 @@ Tool schemas (verified against SDK 0.13.x):
 
 import logging
 import uuid
+from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from typing import Any
 
@@ -21,11 +22,15 @@ logger = logging.getLogger(__name__)
 
 GMAIL_SEND = "GMAIL_SEND_EMAIL"
 CALENDAR_CREATE = "GOOGLECALENDAR_CREATE_EVENT"
+CALENDAR_LIST = "GOOGLECALENDAR_EVENTS_LIST"
+CALENDAR_UPDATE = "GOOGLECALENDAR_UPDATE_EVENT"
 
 # Map our toolkit param to the Composio toolkit slug used for connected-account lookup.
 _TOOLKIT_FOR_SLUG = {
     GMAIL_SEND: "gmail",
     CALENDAR_CREATE: "googlecalendar",
+    CALENDAR_LIST: "googlecalendar",
+    CALENDAR_UPDATE: "googlecalendar",
 }
 
 
@@ -141,6 +146,73 @@ def create_calendar_event(
         or f"evt_{uuid.uuid4().hex[:12]}"
     )
     out["summary"] = summary
+    return out
+
+
+def _normalize_event(e: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a Google Calendar event into ``{id, summary, start, end, all_day}``.
+
+    Google represents timed events with ``start.dateTime`` and all-day events with ``start.date``.
+    """
+    start = e.get("start") or {}
+    end = e.get("end") or {}
+    all_day = bool(start.get("date") and not start.get("dateTime"))
+    return {
+        "id": e.get("id"),
+        "summary": e.get("summary") or "(no title)",
+        "start": start.get("dateTime") or start.get("date"),
+        "end": end.get("dateTime") or end.get("date"),
+        "all_day": all_day,
+    }
+
+
+def list_calendar_events(
+    *, user_id: str, time_min: str | None = None, time_max: str | None = None, max_results: int = 50
+) -> dict[str, Any]:
+    """List the user's upcoming events in [time_min, time_max), normalized + sorted by start."""
+    if not composio_enabled():
+        return {"status": "simulated", "events": []}
+    now = datetime.now(UTC)
+    arguments: dict[str, Any] = {
+        "calendarId": "primary",
+        "timeMin": time_min or now.isoformat(),
+        "timeMax": time_max or (now + timedelta(days=7)).isoformat(),
+        "singleEvents": True,
+        "orderBy": "startTime",
+        "maxResults": max_results,
+    }
+    try:
+        out = _execute(CALENDAR_LIST, arguments, user_id=user_id)
+    except Exception as exc:  # e.g. no connected Google Calendar account for this user_id
+        return {"status": "error", "error": str(exc), "events": []}
+    if out.get("status") != "ok":
+        return {**out, "events": []}
+    items = (out.get("data") or {}).get("items") or []
+    events = [_normalize_event(e) for e in items if e.get("status") != "cancelled"]
+    return {"status": "ok", "events": events}
+
+
+def update_calendar_event(
+    *, user_id: str, event_id: str, start_datetime: str, duration_minutes: int = 30,
+    summary: str | None = None,
+) -> dict[str, Any]:
+    """Reschedule an existing event to ``start_datetime`` (ISO 8601, no offset)."""
+    if not composio_enabled():
+        return {"status": "simulated", "event_id": event_id, "start": start_datetime}
+    arguments: dict[str, Any] = {
+        "event_id": event_id,
+        "start_datetime": start_datetime,
+        "event_duration_minutes": duration_minutes,
+        "calendar_id": "primary",
+        "timezone": settings.composio_timezone,
+    }
+    if summary:
+        arguments["summary"] = summary
+    try:
+        out = _execute(CALENDAR_UPDATE, arguments, user_id=user_id)
+    except Exception as exc:
+        return {"status": "error", "error": str(exc), "event_id": event_id}
+    out["event_id"] = event_id
     return out
 
 

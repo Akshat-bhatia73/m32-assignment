@@ -7,20 +7,8 @@ export function ActionBoard({ onChanged }: { onChanged: () => void }) {
   const items = useBoardStore((s) => s.items)
   const recentlyChanged = useBoardStore((s) => s.recentlyChanged)
 
-  const openCount = items.filter((i) => i.status !== "done").length
-
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex h-[3.75rem] shrink-0 flex-col justify-center border-b border-border px-4">
-        <h2 className="text-sm font-semibold text-foreground">Action Board</h2>
-        <p className="text-xs text-muted-foreground">
-          {items.length === 0
-            ? "Items appear here as you chat"
-            : `${openCount} open · ${items.length} total`}
-        </p>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+    <div className="min-h-0 flex-1 overflow-y-auto p-3">
         {items.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center px-6 text-center">
             <div className="mb-3 flex size-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
@@ -43,7 +31,6 @@ export function ActionBoard({ onChanged }: { onChanged: () => void }) {
             ))}
           </div>
         )}
-      </div>
     </div>
   )
 }

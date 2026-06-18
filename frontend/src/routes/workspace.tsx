@@ -3,7 +3,7 @@ import type { UIMessage } from "ai"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 
-import { ActionBoard } from "@/components/board/action-board"
+import { RightSidebar } from "@/components/board/right-sidebar"
 import { ChatPanel } from "@/components/chat/chat-panel"
 import { SessionSidebar } from "@/components/layout/session-sidebar"
 import { Button } from "@/components/ui/button"
@@ -87,7 +87,9 @@ export function WorkspacePage() {
   const refresh = useCallback(async () => {
     if (!currentId) return
     setAll(await api.getActions(currentId))
-  }, [currentId, setAll])
+    // A turn may have created or moved calendar events — refresh the agenda.
+    queryClient.invalidateQueries({ queryKey: ["calendar-events"] })
+  }, [currentId, setAll, queryClient])
 
   const handleNew = useCallback(async () => {
     const s = await api.createSession()
@@ -184,7 +186,7 @@ export function WorkspacePage() {
                 mobilePane === "board" ? "block" : "hidden md:block"
               )}
             >
-              <ActionBoard onChanged={refresh} />
+              <RightSidebar onChanged={refresh} />
             </div>
           </>
         )}

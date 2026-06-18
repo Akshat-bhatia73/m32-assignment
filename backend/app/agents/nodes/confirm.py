@@ -167,6 +167,40 @@ async def confirm_node(state: GraphState) -> dict:
         )
         return {}
 
+    if action_type == "reschedule_event":
+        tool_call_id = uuid.uuid4().hex
+        writer({
+            "kind": "tool_input", "tool_call_id": tool_call_id, "tool_name": "reschedule_event",
+            "input": {"summary": pending.get("summary"), "start": pending.get("start_datetime")},
+        })
+        res = composio_tools.update_calendar_event(
+            user_id=composio_user_id,
+            event_id=pending["event_id"],
+            start_datetime=pending["start_datetime"],
+        )
+        status = res.get("status")
+        writer({"kind": "tool_output", "tool_call_id": tool_call_id, "output": {"status": status}})
+        if status == "error":
+            detail = res.get("error")
+            logger.error("Calendar reschedule failed for user_id=%s: %s", composio_user_id, detail)
+            hint = f" (details: {detail})" if detail else ""
+            writer({"kind": "say", "text": "I couldn't move that event. Google Calendar may not "
+                    f"be connected for {composio_user_id} — check Settings and try again.{hint}"})
+            return {}  # keep pending for retry
+        # Reflect the new date on the board item.
+        new_date = pending["start_datetime"].split("T")[0]
+        board_event = board_tools.update_action_item(
+            pending["action_item_id"], due_date=new_date
+        )
+        if board_event:
+            writer({"kind": "board", **board_event})
+        session_tools.set_pending_action(session_id, None)
+        sim = " (simulated — add a Composio key to update it for real)" if status == "simulated" \
+            else ""
+        when = pending["start_datetime"].replace("T", " at ")
+        writer({"kind": "say", "text": f"Moved “{pending['summary']}” to {when}{sim}."})
+        return {}
+
     # Unknown / stale pending action.
     session_tools.set_pending_action(session_id, None)
     writer({"kind": "say", "text": "That request expired — could you tell me again what you'd "

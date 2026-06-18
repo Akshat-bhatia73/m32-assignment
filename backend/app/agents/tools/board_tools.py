@@ -92,6 +92,7 @@ def list_items(session_id: uuid.UUID, *, open_only: bool = False) -> list[dict]:
                 "owner": r.owner,
                 "due_date": r.due_date.isoformat() if r.due_date else None,
                 "status": r.status,
+                "external_ref": r.external_ref,
             }
             for r in rows
         ]

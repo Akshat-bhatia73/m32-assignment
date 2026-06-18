@@ -5,6 +5,8 @@ and streams a plain-language draft + a confirmation prompt. The confirm node exe
 """
 
 import uuid
+from datetime import UTC, date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.config import get_stream_writer
@@ -12,9 +14,65 @@ from pydantic import BaseModel, Field
 
 from app.agents.conversation import extract_text
 from app.agents.state import GraphState
-from app.agents.tools import board_tools, session_tools
+from app.agents.tools import board_tools, composio_tools, session_tools
+from app.config import settings
 
 _SCHEDULE_HINTS = ("schedul", "calendar", "event", "invite", "block time", "add to my cal")
+
+# Proposed events default to a 9:00, 30-minute block (mirrors create_calendar_event).
+_EVENT_HOUR = 9
+_EVENT_DURATION_MIN = 30
+
+
+def _tz() -> ZoneInfo:
+    try:
+        return ZoneInfo(settings.composio_timezone)
+    except Exception:  # noqa: BLE001 — bad/unknown tz string falls back to UTC
+        return ZoneInfo("UTC")
+
+
+def _existing_intervals(events: list[dict]) -> list[tuple[datetime, datetime, str]]:
+    """Normalize listed calendar events into (start_utc, end_utc, summary) busy intervals."""
+    tz = _tz()
+    out: list[tuple[datetime, datetime, str]] = []
+    for e in events:
+        summary = e.get("summary") or "(busy)"
+        start_raw, end_raw = e.get("start"), e.get("end")
+        if not start_raw:
+            continue
+        try:
+            if e.get("all_day"):
+                # Date-only bounds; treat as busy for the whole local day(s).
+                s = datetime.combine(date.fromisoformat(start_raw), time.min, tz)
+                end_date = (
+                    date.fromisoformat(end_raw) if end_raw else s.date() + timedelta(days=1)
+                )
+                en = datetime.combine(end_date, time.min, tz)
+            else:
+                s = datetime.fromisoformat(start_raw)
+                en = datetime.fromisoformat(end_raw) if end_raw else s + timedelta(minutes=30)
+        except ValueError:
+            continue
+        # Make tz-aware (assume configured tz if the source had no offset), then compare in UTC.
+        s = s.replace(tzinfo=tz) if s.tzinfo is None else s
+        en = en.replace(tzinfo=tz) if en.tzinfo is None else en
+        out.append((s.astimezone(UTC), en.astimezone(UTC), summary))
+    return out
+
+
+def _conflict_for(event_date: str, intervals: list[tuple[datetime, datetime, str]]) -> str | None:
+    """Return the summary of an existing event the proposed 9:00 block collides with, if any."""
+    try:
+        d = date.fromisoformat(event_date)
+    except (ValueError, TypeError):
+        return None
+    tz = _tz()
+    start = datetime.combine(d, time(_EVENT_HOUR, 0), tz).astimezone(UTC)
+    end = start + timedelta(minutes=_EVENT_DURATION_MIN)
+    for s, en, summary in intervals:
+        if start < en and s < end:  # half-open interval overlap
+            return summary
+    return None
 
 EMAIL_SYSTEM = (
     "You draft a short, warm, professional follow-up email for a small-business owner, summarizing "
@@ -33,6 +91,72 @@ def _wants_schedule(message: str) -> bool:
     return any(h in low for h in _SCHEDULE_HINTS)
 
 
+_RESCHEDULE_HINTS = ("reschedul", "move the", "move my", "push back", "push the", "shift the",
+                     "change the time", "move it", "bump the")
+
+
+def _wants_reschedule(message: str) -> bool:
+    low = message.lower()
+    return any(h in low for h in _RESCHEDULE_HINTS)
+
+
+class RescheduleParse(BaseModel):
+    item_id: str | None = Field(
+        default=None, description="The id of the scheduled item to move, or null if unclear."
+    )
+    new_datetime: str | None = Field(
+        default=None,
+        description="New start as ISO 8601 local datetime 'YYYY-MM-DDTHH:MM:SS', or null.",
+    )
+
+
+async def _reschedule(state: GraphState, message: str) -> dict:
+    """Parse a 'move X to <time>' request against the scheduled items and queue an update."""
+    from app.llm.provider import get_llm
+
+    writer = get_stream_writer()
+    session_id = state["session_id"]
+    items = board_tools.list_items(session_id)
+    scheduled = [i for i in items if i.get("status") == "scheduled" and i.get("external_ref")]
+    if not scheduled:
+        writer({"kind": "say", "text": "I don't see any scheduled events to move yet. Schedule "
+                "some items first, then I can reschedule them."})
+        return {}
+
+    roster = "\n".join(
+        f"- id={i['id']} | {i['task']} | currently due {i.get('due_date') or 'n/a'}"
+        for i in scheduled
+    )
+    today = datetime.now(_tz()).date().isoformat()
+    llm = get_llm(temperature=0.0).with_structured_output(RescheduleParse)
+    parsed: RescheduleParse = await llm.ainvoke([
+        SystemMessage(content=(
+            "Match the user's reschedule request to one scheduled item and resolve the new start "
+            f"time. Today is {today}. Use the configured timezone. Vague times: morning=09:00, "
+            "afternoon=14:00, evening=18:00. Return the item's id and an ISO local datetime "
+            "'YYYY-MM-DDTHH:MM:SS'. If you can't tell which item, return null item_id."
+        )),
+        HumanMessage(content=f"Scheduled items:\n{roster}\n\nRequest:\n{message}"),
+    ])
+    target = next((i for i in scheduled if i["id"] == parsed.item_id), None)
+    if not target or not parsed.new_datetime:
+        writer({"kind": "say", "text": "I'm not sure which event to move or to when. Try e.g. "
+                "“move the pricing-page review to tomorrow afternoon”."})
+        return {}
+
+    session_tools.set_pending_action(session_id, {
+        "type": "reschedule_event",
+        "action_item_id": target["id"],
+        "event_id": target["external_ref"],
+        "summary": target["task"],
+        "start_datetime": parsed.new_datetime,
+    })
+    when = parsed.new_datetime.replace("T", " at ")
+    writer({"kind": "say", "text": f"I'll move “{target['task']}” to {when}. Reply “yes” to "
+            "update your calendar, or tell me a different time."})
+    return {}
+
+
 async def comms_node(state: GraphState) -> dict:
     from app.llm.provider import get_llm
 
@@ -40,6 +164,9 @@ async def comms_node(state: GraphState) -> dict:
     session_id = state["session_id"]
     message = extract_text(state["messages"][-1].content)
     open_items = board_tools.list_items(session_id, open_only=True)
+
+    if _wants_reschedule(message):
+        return await _reschedule(state, message)
 
     if _wants_schedule(message):
         tool_call_id = uuid.uuid4().hex
@@ -64,16 +191,61 @@ async def comms_node(state: GraphState) -> dict:
             {"action_item_id": i["id"], "summary": i["task"], "date": i["due_date"]}
             for i in dated
         ]
+        # Read the user's existing agenda over the proposed window to flag overlaps up front.
+        intervals: list[tuple[datetime, datetime, str]] = []
+        user_email = state.get("user_email")
+        dates = sorted(e["date"] for e in events)
+        if user_email and dates:
+            tz = _tz()
+            time_min = datetime.combine(date.fromisoformat(dates[0]), time.min, tz)
+            time_max = datetime.combine(
+                date.fromisoformat(dates[-1]) + timedelta(days=1), time.min, tz
+            )
+            listed = composio_tools.list_calendar_events(
+                user_id=user_email,
+                time_min=time_min.astimezone(UTC).isoformat(),
+                time_max=time_max.astimezone(UTC).isoformat(),
+            )
+            if listed.get("status") == "ok":
+                intervals = _existing_intervals(listed.get("events", []))
+
+        tz = _tz()
+        for e in events:
+            start = datetime.combine(
+                date.fromisoformat(e["date"]), time(_EVENT_HOUR, 0), tz
+            )
+            e["start"] = start.isoformat()
+            e["conflict"] = _conflict_for(e["date"], intervals)
+
         writer(
             {"kind": "tool_output", "tool_call_id": tool_call_id, "output": {"events": len(events)}}
         )
         session_tools.set_pending_action(
             session_id, {"type": "create_events", "events": events}
         )
-        lines = "\n".join(f"• {e['summary']} — {e['date']}" for e in events)
+        # Structured part → the client renders a calendar proposal card with ⚠ conflict badges.
+        writer(
+            {"kind": "calendar_proposal", "events": [
+                {"summary": e["summary"], "date": e["date"], "start": e["start"],
+                 "conflict": e["conflict"]}
+                for e in events
+            ]}
+        )
+        n_conflicts = sum(1 for e in events if e["conflict"])
+        lines = "\n".join(
+            f"• {e['summary']} — {e['date']} at {_EVENT_HOUR}:00"
+            + (f" ⚠ overlaps “{e['conflict']}”" if e["conflict"] else "")
+            for e in events
+        )
+        warn = (
+            f"\n\n{n_conflicts} of these overlap an existing event — you can reschedule after, "
+            "or tell me a different time."
+            if n_conflicts
+            else ""
+        )
         writer(
             {"kind": "say", "text": f"I can add {len(events)} calendar event"
-             f"{'s' if len(events) != 1 else ''}:\n{lines}\n\nReply “yes” to add them, "
+             f"{'s' if len(events) != 1 else ''}:\n{lines}{warn}\n\nReply “yes” to add them, "
              "or tell me what to change."}
         )
         return {}
