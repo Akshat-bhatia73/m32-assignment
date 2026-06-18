@@ -20,5 +20,5 @@ RUN uv sync --no-dev 2>/dev/null || true
 
 ENV PATH="/app/.venv/bin:$PATH"
 
-# Render provides $PORT.
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Render provides $PORT. Run DB migrations before starting the server.
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

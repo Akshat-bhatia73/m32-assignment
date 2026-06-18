@@ -11,8 +11,8 @@ services:
     plan: free
     region: oregon
     healthCheckPath: /health
-    # Run DB migrations before the server starts (free tier has no pre-deploy hook).
-    dockerCommand: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    # Migrations + server start are baked into the Dockerfile CMD (alembic upgrade head &&
+    # uvicorn …), so no dockerCommand override here — that override mangles the && quoting.
     autoDeploy: true
     envVars:
       - key: DATABASE_URL
