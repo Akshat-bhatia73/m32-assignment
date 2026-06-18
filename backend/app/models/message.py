@@ -1,9 +1,10 @@
 """Persisted chat messages — the source of in-session memory."""
 
 import uuid
+from typing import Any
 
 from sqlalchemy import ForeignKey, String, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -18,5 +19,7 @@ class Message(UUIDMixin, TimestampMixin, Base):
     )
     role: Mapped[str] = mapped_column(String(20))  # "user" | "assistant" | "tool"
     content: Mapped[str] = mapped_column(Text)
+    # Attachments sent with this turn (uploaded files / long pasted blobs), each {id,name,kind,...}.
+    artifacts: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)
 
     session: Mapped["ChatSession"] = relationship(back_populates="messages")  # noqa: F821

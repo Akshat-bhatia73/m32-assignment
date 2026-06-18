@@ -8,9 +8,34 @@ from sqlalchemy import select
 from app.api.deps import CurrentUser, DbSession
 from app.models import ActionItem, ChatSession
 from app.models.action_item import ACTION_STATUSES
-from app.schemas.action import ActionItemOut, ActionItemUpdate
+from app.schemas.action import ActionItemOut, ActionItemUpdate, ActionItemWithSession
 
 router = APIRouter(tags=["actions"])
+
+
+@router.get("/actions", response_model=list[ActionItemWithSession])
+def list_all_actions(
+    current_user: CurrentUser,
+    db: DbSession,
+    status_filter: str | None = None,
+) -> list[ActionItemWithSession]:
+    """Every action item for the current user across all sessions (overview screen)."""
+    stmt = (
+        select(ActionItem, ChatSession.title)
+        .join(ChatSession, ActionItem.session_id == ChatSession.id)
+        .where(ActionItem.user_id == current_user.id)
+        .order_by(ActionItem.created_at.desc())
+    )
+    if status_filter and status_filter in ACTION_STATUSES:
+        stmt = stmt.where(ActionItem.status == status_filter)
+    rows = db.execute(stmt).all()
+    return [
+        ActionItemWithSession(
+            **ActionItemOut.model_validate(item).model_dump(),
+            session_title=title or "Untitled",
+        )
+        for item, title in rows
+    ]
 
 
 @router.get("/sessions/{session_id}/actions", response_model=list[ActionItemOut])

@@ -6,11 +6,15 @@ from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 
+from app.agents.conversation import generate_title
 from app.agents.graph import stream_agent
 from app.api.deps import CurrentUser, DbSession
 from app.models import ChatSession, Message
 from app.schemas.chat import ChatRequest
 from app.services import ai_stream
+
+# Placeholder titles a fresh session may carry until the first turn names it.
+_DEFAULT_TITLES = {"New session", "Workspace", ""}
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -23,8 +27,22 @@ def chat_stream(
     if session is None or session.user_id != current_user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
 
+    # Split what the user sees (typed text + attachment chips) from what the agent reads
+    # (typed text with the full attachment contents inlined for extraction).
+    display_text = payload.message
+    if payload.artifacts:
+        blob = "\n\n".join(f"--- {a.name} ---\n{a.content}" for a in payload.artifacts)
+        agent_input = f"{display_text}\n\n{blob}".strip() if display_text.strip() else blob
+    else:
+        agent_input = display_text
+
     # Persist the user turn first so it survives a dropped connection.
-    user_msg = Message(session_id=session.id, role="user", content=payload.message)
+    user_msg = Message(
+        session_id=session.id,
+        role="user",
+        content=display_text,
+        artifacts=[a.model_dump() for a in payload.artifacts] or None,
+    )
     db.add(user_msg)
     db.commit()
 
@@ -33,12 +51,26 @@ def chat_stream(
         select(Message).where(Message.session_id == session.id).order_by(Message.created_at)
     ).all()
     history = [(m.role, m.content) for m in rows if m.id != user_msg.id]
+    # Name the session from its first turn so the sidebar reads meaningfully.
+    needs_title = not history and (session.title or "").strip() in _DEFAULT_TITLES
+    session_id = session.id
 
     async def generator() -> AsyncGenerator[str, None]:
         assistant_text = ""
+        title_part: str | None = None
+        if needs_title:
+            title = await generate_title(agent_input)
+            session.title = title
+            db.commit()
+            title_part = ai_stream.sse(
+                ai_stream.data_part(
+                    "session-title", {"session_id": str(session_id), "title": title}
+                )
+            )
         try:
+            started = False
             async for chunk, final in stream_agent(
-                payload.message,
+                agent_input,
                 history,
                 session.id,
                 current_user.id,
@@ -48,6 +80,10 @@ def chat_stream(
                 if final is not None:
                     assistant_text = final
                 yield chunk
+                # Emit the new title right after the message envelope's `start` part.
+                if title_part and not started:
+                    started = True
+                    yield title_part
         except Exception as exc:  # surface a protocol error instead of a broken stream
             yield ai_stream.sse(ai_stream.error(f"Agent error: {exc}"))
             yield ai_stream.done()

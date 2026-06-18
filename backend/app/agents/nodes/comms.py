@@ -4,6 +4,8 @@ Nothing external happens here. It prepares the action, stores it as the session'
 and streams a plain-language draft + a confirmation prompt. The confirm node executes on "yes".
 """
 
+import uuid
+
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.config import get_stream_writer
 from pydantic import BaseModel, Field
@@ -40,8 +42,18 @@ async def comms_node(state: GraphState) -> dict:
     open_items = board_tools.list_items(session_id, open_only=True)
 
     if _wants_schedule(message):
+        tool_call_id = uuid.uuid4().hex
+        writer(
+            {
+                "kind": "tool_input",
+                "tool_call_id": tool_call_id,
+                "tool_name": "plan_calendar_events",
+                "input": {"open_items": len(open_items)},
+            }
+        )
         dated = [i for i in open_items if i.get("due_date")]
         if not dated:
+            writer({"kind": "tool_output", "tool_call_id": tool_call_id, "output": {"events": 0}})
             writer(
                 {"kind": "say", "text": "None of your open items have a due date yet, so there's "
                  "nothing to schedule. Add due dates and I'll set up the calendar events."}
@@ -52,6 +64,9 @@ async def comms_node(state: GraphState) -> dict:
             {"action_item_id": i["id"], "summary": i["task"], "date": i["due_date"]}
             for i in dated
         ]
+        writer(
+            {"kind": "tool_output", "tool_call_id": tool_call_id, "output": {"events": len(events)}}
+        )
         session_tools.set_pending_action(
             session_id, {"type": "create_events", "events": events}
         )
@@ -68,6 +83,16 @@ async def comms_node(state: GraphState) -> dict:
         writer({"kind": "say", "text": "There are no open action items to summarize yet."})
         return {}
 
+    tool_call_id = uuid.uuid4().hex
+    writer(
+        {
+            "kind": "tool_input",
+            "tool_call_id": tool_call_id,
+            "tool_name": "draft_followup_email",
+            "input": {"items": len(open_items)},
+        }
+    )
+
     llm = get_llm(temperature=0.4).with_structured_output(EmailDraft)
     item_lines = "\n".join(
         f"- {i['task']}"
@@ -80,6 +105,9 @@ async def comms_node(state: GraphState) -> dict:
             SystemMessage(content=EMAIL_SYSTEM),
             HumanMessage(content=f"Action items:\n{item_lines}"),
         ]
+    )
+    writer(
+        {"kind": "tool_output", "tool_call_id": tool_call_id, "output": {"subject": draft.subject}}
     )
     # Send the summary to the owner themselves (a real, valid inbox); the body covers who-owns-what.
     recipient = state.get("user_email")

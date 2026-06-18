@@ -20,6 +20,12 @@ class ActionItemOut(BaseModel):
     updated_at: datetime
 
 
+class ActionItemWithSession(ActionItemOut):
+    """An action item plus the title of the session it belongs to (overview screen)."""
+
+    session_title: str
+
+
 class ActionItemCreate(BaseModel):
     task: str
     owner: str | None = None

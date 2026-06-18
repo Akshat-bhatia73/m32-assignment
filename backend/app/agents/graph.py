@@ -8,6 +8,7 @@ Graph:
 LLM token messages) into Vercel AI SDK v5 UI message stream parts.
 """
 
+import re
 import uuid
 from collections.abc import AsyncGenerator
 from functools import lru_cache
@@ -30,6 +31,12 @@ from app.services import ai_stream
 
 # Nodes whose LLM tokens should stream to the user as assistant text.
 _TEXT_NODES = {"respond", "summarize"}
+
+
+def _word_chunks(text: str) -> list[str]:
+    """Split deterministic node text into word-sized pieces so it streams in instead of popping
+    in as one block (keeps trailing whitespace/newlines attached)."""
+    return re.findall(r"\s*\S+|\s+", text) or [text]
 
 
 @lru_cache
@@ -135,6 +142,15 @@ async def stream_agent(
                 yield ai_stream.sse(
                     ai_stream.tool_output(chunk["tool_call_id"], chunk["output"])
                 ), None
+            elif kind == "status":
+                # A short "thinking" step (router decision / which node is working).
+                yield ai_stream.sse(
+                    ai_stream.data_part(
+                        "status",
+                        {"label": chunk["label"], "node": chunk.get("node")},
+                        part_id=uuid.uuid4().hex,
+                    )
+                ), None
             elif kind == "board":
                 item = {k: v for k, v in chunk.items() if k != "kind"}
                 yield ai_stream.sse(
@@ -146,7 +162,8 @@ async def stream_agent(
                     yield ai_stream.sse(ai_stream.text_start(text_id)), None
                     text_open = True
                 full_text += chunk["text"]
-                yield ai_stream.sse(ai_stream.text_delta(text_id, chunk["text"])), None
+                for piece in _word_chunks(chunk["text"]):
+                    yield ai_stream.sse(ai_stream.text_delta(text_id, piece)), None
         elif stream_mode == "messages":
             msg_chunk, meta = chunk
             if meta.get("langgraph_node") not in _TEXT_NODES:

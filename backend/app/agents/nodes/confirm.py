@@ -5,6 +5,7 @@ via the Composio seam (simulated until a key is set), updates the board, and cle
 action. This is the only place external side effects happen.
 """
 
+import uuid
 from typing import Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -69,6 +70,15 @@ async def confirm_node(state: GraphState) -> dict:
     composio_user_id = state.get("user_email") or str(session_id)
     action_type = pending.get("type")
     if action_type == "send_email":
+        tool_call_id = uuid.uuid4().hex
+        writer(
+            {
+                "kind": "tool_input",
+                "tool_call_id": tool_call_id,
+                "tool_name": "send_email",
+                "input": {"to": pending["to"], "subject": pending["subject"]},
+            }
+        )
         result = composio_tools.send_gmail(
             user_id=composio_user_id,
             to=pending["to"],
@@ -76,6 +86,7 @@ async def confirm_node(state: GraphState) -> dict:
             body=pending["body"],
         )
         status = result.get("status")
+        writer({"kind": "tool_output", "tool_call_id": tool_call_id, "output": {"status": status}})
         if status == "error":
             writer(
                 {"kind": "say", "text": "I couldn't send it — your Gmail account may not be "
@@ -90,8 +101,18 @@ async def confirm_node(state: GraphState) -> dict:
         return {}
 
     if action_type == "create_events":
+        events_pending = pending.get("events", [])
+        tool_call_id = uuid.uuid4().hex
+        writer(
+            {
+                "kind": "tool_input",
+                "tool_call_id": tool_call_id,
+                "tool_name": "create_calendar_events",
+                "input": {"events": len(events_pending)},
+            }
+        )
         created, failed = 0, 0
-        for event in pending.get("events", []):
+        for event in events_pending:
             res = composio_tools.create_calendar_event(
                 user_id=composio_user_id, summary=event["summary"], event_date=event["date"]
             )
@@ -104,6 +125,13 @@ async def confirm_node(state: GraphState) -> dict:
             if board_event:
                 writer({"kind": "board", **board_event})
             created += 1
+        writer(
+            {
+                "kind": "tool_output",
+                "tool_call_id": tool_call_id,
+                "output": {"created": created, "failed": failed},
+            }
+        )
         if created == 0 and failed:
             writer(
                 {"kind": "say", "text": "I couldn't add those events — your Google Calendar may "

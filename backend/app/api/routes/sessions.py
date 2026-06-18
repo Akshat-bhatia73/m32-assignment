@@ -7,7 +7,7 @@ from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DbSession
 from app.models import ChatSession, Message
-from app.schemas.chat import MessageOut, SessionCreate, SessionOut
+from app.schemas.chat import MessageOut, SessionCreate, SessionOut, SessionUpdate
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -36,6 +36,29 @@ def list_sessions(current_user: CurrentUser, db: DbSession) -> list[ChatSession]
         .order_by(ChatSession.created_at.desc())
     ).all()
     return list(rows)
+
+
+@router.patch("/{session_id}", response_model=SessionOut)
+def rename_session(
+    session_id: uuid.UUID, payload: SessionUpdate, current_user: CurrentUser, db: DbSession
+) -> ChatSession:
+    session = _owned_session(db, session_id, current_user.id)
+    title = payload.title.strip()
+    if not title:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Title cannot be empty")
+    session.title = title[:200]
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+@router.delete("/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_session(
+    session_id: uuid.UUID, current_user: CurrentUser, db: DbSession
+) -> None:
+    session = _owned_session(db, session_id, current_user.id)
+    db.delete(session)  # messages / meetings / action items cascade on delete
+    db.commit()
 
 
 @router.get("/{session_id}/messages", response_model=list[MessageOut])

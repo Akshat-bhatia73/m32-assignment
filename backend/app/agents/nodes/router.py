@@ -3,6 +3,7 @@
 from typing import Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from langgraph.config import get_stream_writer
 from pydantic import BaseModel, Field
 
 from app.agents.conversation import extract_text
@@ -30,7 +31,19 @@ class RouteDecision(BaseModel):
     )
 
 
+# Human-readable next-step label per route, surfaced as a "thinking" step.
+_ROUTE_STEPS = {
+    "extract": "Reading your notes",
+    "edit": "Updating the board",
+    "comms": "Preparing communications",
+    "confirm": "Carrying that out",
+    "chat": "Thinking",
+}
+
+
 async def router_node(state: GraphState) -> dict:
+    writer = get_stream_writer()
+    writer({"kind": "status", "node": "router", "label": "Understanding your request"})
     last = extract_text(state["messages"][-1].content)
     pending = state.get("pending_action")
     pending_note = (
@@ -49,4 +62,5 @@ async def router_node(state: GraphState) -> dict:
     # Guard: 'confirm' only makes sense with a pending action.
     if route == "confirm" and not pending:
         route = "chat"
+    writer({"kind": "status", "node": route, "label": _ROUTE_STEPS.get(route, "Working")})
     return {"route": route}

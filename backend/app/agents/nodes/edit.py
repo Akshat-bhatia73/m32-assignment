@@ -5,6 +5,7 @@ then emits a structured edit plan. We apply each edit deterministically via boar
 stream board events + a plain-language confirmation ("say" event).
 """
 
+import uuid
 from datetime import date
 from typing import Literal
 
@@ -64,6 +65,17 @@ async def edit_node(state: GraphState) -> dict:
     board = board_tools.list_items(session_id)
 
     request = extract_text(state["messages"][-1].content)
+
+    tool_call_id = uuid.uuid4().hex
+    writer(
+        {
+            "kind": "tool_input",
+            "tool_call_id": tool_call_id,
+            "tool_name": "update_board",
+            "input": {"request": request[:300]},
+        }
+    )
+
     llm = get_llm(temperature=0.0).with_structured_output(EditPlan)
     plan: EditPlan = await llm.ainvoke(
         [
@@ -103,6 +115,18 @@ async def edit_node(state: GraphState) -> dict:
             if event:
                 writer({"kind": "board", **event})
                 updated.append(event)
+
+    writer(
+        {
+            "kind": "tool_output",
+            "tool_call_id": tool_call_id,
+            "output": {
+                "added": len(created),
+                "updated": len(updated),
+                "removed": len(deleted),
+            },
+        }
+    )
 
     if not created and not updated and not deleted:
         writer(
