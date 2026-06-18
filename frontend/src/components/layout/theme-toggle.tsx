@@ -1,6 +1,6 @@
 import { Moon, Sun } from "lucide-react"
 
-import { Button } from "@/components/ui/button"
+import { IconButton } from "@/components/ui/icon-button"
 import { useTheme } from "@/components/theme-provider"
 
 export function ThemeToggle() {
@@ -12,13 +12,13 @@ export function ThemeToggle() {
       window.matchMedia("(prefers-color-scheme: dark)").matches)
 
   return (
-    <Button
+    <IconButton
+      tooltip={isDark ? "Switch to light" : "Switch to dark"}
+      tooltipSide="bottom"
       variant="ghost"
-      size="icon"
-      aria-label="Toggle theme"
       onClick={() => setTheme(isDark ? "light" : "dark")}
     >
       {isDark ? <Sun className="size-4" /> : <Moon className="size-4" />}
-    </Button>
+    </IconButton>
   )
 }

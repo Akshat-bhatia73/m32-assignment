@@ -11,15 +11,13 @@ export function ActionBoard({ onChanged }: { onChanged: () => void }) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3">
-        <div>
-          <h2 className="text-sm font-semibold text-foreground">Action Board</h2>
-          <p className="text-xs text-muted-foreground">
-            {items.length === 0
-              ? "Items appear here as you chat"
-              : `${openCount} open · ${items.length} total`}
-          </p>
-        </div>
+      <div className="flex h-[3.75rem] shrink-0 flex-col justify-center border-b border-border px-4">
+        <h2 className="text-sm font-semibold text-foreground">Action Board</h2>
+        <p className="text-xs text-muted-foreground">
+          {items.length === 0
+            ? "Items appear here as you chat"
+            : `${openCount} open · ${items.length} total`}
+        </p>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-3">

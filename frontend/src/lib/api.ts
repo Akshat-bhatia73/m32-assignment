@@ -1,4 +1,11 @@
-import type { ActionItem, ChatMessage, Session, User } from "@/lib/types"
+import type {
+  ActionItem,
+  ActionItemWithSession,
+  ChatMessage,
+  ExtractedTranscript,
+  Session,
+  User,
+} from "@/lib/types"
 
 export const API_BASE =
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://localhost:8000"
@@ -42,12 +49,39 @@ export const api = {
   listSessions: () => request<Session[]>("/sessions"),
   createSession: (title?: string) =>
     request<Session>("/sessions", { method: "POST", body: JSON.stringify({ title }) }),
+  renameSession: (id: string, title: string) =>
+    request<Session>(`/sessions/${id}`, { method: "PATCH", body: JSON.stringify({ title }) }),
+  deleteSession: (id: string) => request<void>(`/sessions/${id}`, { method: "DELETE" }),
   getMessages: (sessionId: string) =>
     request<ChatMessage[]>(`/sessions/${sessionId}/messages`),
 
   getActions: (sessionId: string) =>
     request<ActionItem[]>(`/sessions/${sessionId}/actions`),
+  getAllActions: (status?: string) =>
+    request<ActionItemWithSession[]>(
+      `/actions${status ? `?status_filter=${encodeURIComponent(status)}` : ""}`
+    ),
   updateAction: (id: string, body: Partial<Pick<ActionItem, "status">>) =>
     request<ActionItem>(`/actions/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteAction: (id: string) => request<void>(`/actions/${id}`, { method: "DELETE" }),
+
+  extractTranscript: async (file: File): Promise<ExtractedTranscript> => {
+    const form = new FormData()
+    form.append("file", file)
+    const res = await fetch(`${API_BASE}/meetings/extract`, {
+      method: "POST",
+      credentials: "include",
+      body: form, // let the browser set the multipart boundary
+    })
+    if (!res.ok) {
+      let detail = res.statusText
+      try {
+        detail = (await res.json()).detail ?? detail
+      } catch {
+        /* non-JSON */
+      }
+      throw new ApiError(res.status, detail)
+    }
+    return res.json() as Promise<ExtractedTranscript>
+  },
 }

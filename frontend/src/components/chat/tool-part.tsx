@@ -4,6 +4,11 @@ import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from "@/componen
 
 const TITLES: Record<string, string> = {
   extract_action_items: "Reading the notes",
+  update_board: "Updating the board",
+  draft_followup_email: "Drafting the follow-up email",
+  plan_calendar_events: "Planning calendar events",
+  send_email: "Sending the email",
+  create_calendar_events: "Adding calendar events",
 }
 
 function titleFor(toolName: string): string {

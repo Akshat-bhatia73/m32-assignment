@@ -9,6 +9,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import type { ActionItem } from "@/lib/types"
@@ -52,13 +53,25 @@ export function ActionCard({
       <div className="flex items-start justify-between gap-2">
         <p className="text-sm font-medium leading-snug text-foreground">{item.task}</p>
         <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button variant="ghost" size="icon-sm" className="-mr-1 -mt-1 shrink-0">
-                <MoreHorizontal className="size-4" />
-              </Button>
-            }
-          />
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Task options"
+                      className="-mr-1 -mt-1 shrink-0 rounded-full"
+                    >
+                      <MoreHorizontal className="size-4" />
+                    </Button>
+                  }
+                />
+              }
+            />
+            <TooltipContent>Task options</TooltipContent>
+          </Tooltip>
           <DropdownMenuContent align="end">
             {item.status === "done" ? (
               <DropdownMenuItem onClick={() => setStatus("open")}>
