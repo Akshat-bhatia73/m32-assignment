@@ -26,6 +26,11 @@ class ActionItem(UUIDMixin, TimestampMixin, UpdatedAtMixin, Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
+    # Org that owns this item (so the board is shared across the workspace). Nullable for legacy.
+    org_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True,
+        index=True,
+    )
 
     task: Mapped[str] = mapped_column(Text)
     owner: Mapped[str | None] = mapped_column(String(200), nullable=True)

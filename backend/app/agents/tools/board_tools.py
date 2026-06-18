@@ -61,11 +61,13 @@ def add_action_item(
     task: str,
     owner: str | None = None,
     due_date: str | None = None,
+    org_id: uuid.UUID | None = None,
 ) -> dict:
     with SessionLocal() as db:
         item = ActionItem(
             session_id=session_id,
             user_id=user_id,
+            org_id=org_id,
             meeting_id=meeting_id,
             task=task,
             owner=owner,

@@ -11,7 +11,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Separator } from "@/components/ui/separator"
 import { Spinner } from "@/components/ui/spinner"
+import { TeamSettings } from "@/components/layout/team-settings"
 import { api, ApiError } from "@/lib/api"
 import type { IntegrationStatus } from "@/lib/types"
 
@@ -126,6 +128,10 @@ export function SettingsDialog({
             })}
           </ul>
         </section>
+
+        <Separator />
+
+        <TeamSettings open={open} />
       </DialogContent>
     </Dialog>
   )

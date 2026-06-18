@@ -5,6 +5,7 @@ import type {
   ChatMessage,
   ExtractedTranscript,
   IntegrationStatus,
+  Org,
   Session,
   User,
 } from "@/lib/types"
@@ -73,6 +74,14 @@ export const api = {
 
   getCalendarEvents: (days = 7) =>
     request<CalendarEventsResponse>(`/calendar/events?days=${days}`),
+
+  getOrg: () => request<Org>("/org"),
+  renameOrg: (name: string) =>
+    request<Org>("/org", { method: "PATCH", body: JSON.stringify({ name }) }),
+  createInvite: (body: { email: string; name?: string }) =>
+    request<Org>("/org/invites", { method: "POST", body: JSON.stringify(body) }),
+  revokeInvite: (id: string) => request<Org>(`/org/invites/${id}`, { method: "DELETE" }),
+  removeMember: (id: string) => request<Org>(`/org/members/${id}`, { method: "DELETE" }),
 
   extractTranscript: async (file: File): Promise<ExtractedTranscript> => {
     const form = new FormData()

@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session
 
 from app.auth.jwt import COOKIE_NAME, decode_access_token
 from app.database import get_db
-from app.models import User
+from app.models import Membership, Organization, User
+from app.services import orgs
 
 DbSession = Annotated[Session, Depends(get_db)]
 
@@ -37,3 +38,21 @@ def get_current_user(
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+def get_current_membership(current_user: CurrentUser, db: DbSession) -> Membership:
+    """The current user's org membership (lazily created if missing)."""
+    return orgs.ensure_membership(db, current_user)
+
+
+CurrentMembership = Annotated[Membership, Depends(get_current_membership)]
+
+
+def get_current_org(membership: CurrentMembership, db: DbSession) -> Organization:
+    org = db.get(Organization, membership.org_id)
+    if org is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Organization not found")
+    return org
+
+
+CurrentOrg = Annotated[Organization, Depends(get_current_org)]

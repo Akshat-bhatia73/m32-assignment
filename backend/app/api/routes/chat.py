@@ -8,10 +8,10 @@ from sqlalchemy import select
 
 from app.agents.conversation import generate_title
 from app.agents.graph import stream_agent
-from app.api.deps import CurrentUser, DbSession
+from app.api.deps import CurrentMembership, CurrentUser, DbSession
 from app.models import ChatSession, Message
 from app.schemas.chat import ChatRequest
-from app.services import ai_stream
+from app.services import ai_stream, orgs
 
 # Placeholder titles a fresh session may carry until the first turn names it.
 _DEFAULT_TITLES = {"New session", "Workspace", ""}
@@ -21,11 +21,16 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 @router.post("/stream")
 def chat_stream(
-    payload: ChatRequest, current_user: CurrentUser, db: DbSession
+    payload: ChatRequest,
+    current_user: CurrentUser,
+    membership: CurrentMembership,
+    db: DbSession,
 ) -> StreamingResponse:
     session = db.get(ChatSession, payload.session_id)
-    if session is None or session.user_id != current_user.id:
+    if session is None or session.org_id != membership.org_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
+    org_id = membership.org_id
+    members = orgs.org_roster(db, org_id)
 
     # Split what the user sees (typed text + attachment chips) from what the agent reads
     # (typed text with the full attachment contents inlined for extraction).
@@ -95,6 +100,8 @@ def chat_stream(
                 current_user.id,
                 current_user.name,
                 current_user.email,
+                org_id=org_id,
+                members=members,
             ):
                 if final is not None:
                     assistant_text = final

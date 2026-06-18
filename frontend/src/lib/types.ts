@@ -109,6 +109,34 @@ export type CalendarEventsResponse = {
   events: CalendarEvent[]
 }
 
+export type OrgRole = "owner" | "member"
+
+export type OrgMember = {
+  id: string
+  name: string | null
+  email: string
+  role: OrgRole
+}
+
+export type Invitation = {
+  id: string
+  email: string
+  name: string | null
+  role: OrgRole
+  status: "pending" | "accepted" | "revoked"
+  created_at: string
+}
+
+/** The current user's organization (workspace), members, and pending invites. */
+export type Org = {
+  id: string
+  name: string
+  role: OrgRole // the current user's role
+  member_cap: number
+  members: OrgMember[]
+  invites: Invitation[]
+}
+
 /** One proposed calendar event in a `data-calendar-proposal` part. */
 export type CalendarProposalItem = {
   summary: string

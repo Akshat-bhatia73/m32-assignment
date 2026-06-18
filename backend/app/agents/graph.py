@@ -105,6 +105,8 @@ async def stream_agent(
     user_id: uuid.UUID,
     user_name: str | None = None,
     user_email: str | None = None,
+    org_id: uuid.UUID | None = None,
+    members: list[dict] | None = None,
 ) -> AsyncGenerator[tuple[str, str | None], None]:
     """Yield (sse_chunk, final_assistant_text|None) pairs.
 
@@ -122,6 +124,8 @@ async def stream_agent(
         "user_id": user_id,
         "user_name": user_name,
         "user_email": user_email,
+        "org_id": org_id,
+        "members": members or [],
         "pending_action": session_tools.get_pending_action(session_id),
     }
 

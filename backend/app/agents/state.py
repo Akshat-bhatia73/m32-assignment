@@ -17,6 +17,9 @@ class GraphState(TypedDict, total=False):
     user_id: uuid.UUID
     user_name: str | None
     user_email: str | None
+    org_id: uuid.UUID | None
+    # Org roster [{id, name, email, role}] — used to resolve action-item owners to teammate emails.
+    members: list[dict[str, Any]]
     meeting_id: uuid.UUID | None
     route: str  # set by the router: "extract" | "edit" | "comms" | "confirm" | "chat"
     # Action items created this turn (board events), passed from extractor -> summarize.

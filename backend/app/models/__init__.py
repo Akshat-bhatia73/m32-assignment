@@ -4,6 +4,16 @@ from app.models.action_item import ActionItem
 from app.models.chat_session import ChatSession
 from app.models.meeting import Meeting
 from app.models.message import Message
+from app.models.organization import Invitation, Membership, Organization
 from app.models.user import User
 
-__all__ = ["User", "ChatSession", "Message", "Meeting", "ActionItem"]
+__all__ = [
+    "User",
+    "ChatSession",
+    "Message",
+    "Meeting",
+    "ActionItem",
+    "Organization",
+    "Membership",
+    "Invitation",
+]

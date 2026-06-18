@@ -3,7 +3,16 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import actions, auth, calendar, chat, integrations, meetings, sessions
+from app.api.routes import (
+    actions,
+    auth,
+    calendar,
+    chat,
+    integrations,
+    meetings,
+    orgs,
+    sessions,
+)
 from app.config import settings
 
 app = FastAPI(title="Meeting → Done — Ops Copilot API", version="0.1.0")
@@ -23,6 +32,7 @@ app.include_router(meetings.router)
 app.include_router(actions.router)
 app.include_router(integrations.router)
 app.include_router(calendar.router)
+app.include_router(orgs.router)
 
 
 @app.get("/health", tags=["meta"])

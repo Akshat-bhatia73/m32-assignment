@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     composio_api_key: str = ""
     composio_timezone: str = "UTC"  # IANA tz for created calendar events
 
+    # Teams / orgs
+    org_member_cap: int = 10  # max members per organization (owner included)
+
     # CORS / cookies
     frontend_origin: str = "http://localhost:5173"
     cookie_samesite: str = "lax"  # "lax" (dev) | "none" (cross-site prod)

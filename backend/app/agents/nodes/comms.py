@@ -91,6 +91,38 @@ def _wants_schedule(message: str) -> bool:
     return any(h in low for h in _SCHEDULE_HINTS)
 
 
+def _resolve_owner_emails(open_items: list[dict], members: list[dict]) -> set[str]:
+    """Map each open item's free-text owner to a teammate email from the org roster.
+
+    Matches exactly on email or full name, then falls back to first name. Unmatched owners are
+    skipped (the follow-up still goes to the organizer).
+    """
+    by_email: dict[str, str] = {}
+    by_name: dict[str, str] = {}
+    by_first: dict[str, str] = {}
+    for m in members:
+        email = (m.get("email") or "").strip()
+        if not email:
+            continue
+        by_email[email.lower()] = email
+        name = (m.get("name") or "").strip()
+        if name:
+            by_name[name.lower()] = email
+            by_first.setdefault(name.split()[0].lower(), email)
+        # Also let the email's local-part match a first-name-style owner string.
+        by_first.setdefault(email.split("@")[0].lower(), email)
+
+    resolved: set[str] = set()
+    for item in open_items:
+        owner = (item.get("owner") or "").strip().lower()
+        if not owner:
+            continue
+        email = by_email.get(owner) or by_name.get(owner) or by_first.get(owner.split()[0])
+        if email:
+            resolved.add(email)
+    return resolved
+
+
 _RESCHEDULE_HINTS = ("reschedul", "move the", "move my", "push back", "push the", "shift the",
                      "change the time", "move it", "bump the")
 
@@ -281,12 +313,15 @@ async def comms_node(state: GraphState) -> dict:
     writer(
         {"kind": "tool_output", "tool_call_id": tool_call_id, "output": {"subject": draft.subject}}
     )
-    # Send the summary to the owner themselves (a real, valid inbox); the body covers who-owns-what.
-    recipient = state.get("user_email")
-    if not recipient:
+    organizer = state.get("user_email")
+    if not organizer:
         writer({"kind": "say", "text": "I don't have an email address on file to send this to."})
         return {}
-    to = [recipient]
+    # Resolve each item's owner to a real teammate email; the follow-up goes to the owners
+    # (with the organizer always included), not just the sender's own inbox.
+    members = state.get("members") or []
+    owner_emails = _resolve_owner_emails(open_items, members)
+    to = sorted(owner_emails | {organizer})
     session_tools.set_pending_action(
         session_id,
         {"type": "send_email", "to": to, "subject": draft.subject, "body": draft.body},

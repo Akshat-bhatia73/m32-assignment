@@ -9,6 +9,7 @@ from app.auth.password import hash_password, verify_password
 from app.config import settings
 from app.models import User
 from app.schemas.auth import LoginRequest, SignupRequest, UserOut
+from app.services import orgs
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -39,6 +40,8 @@ def signup(payload: SignupRequest, response: Response, db: DbSession) -> User:
     db.add(user)
     db.commit()
     db.refresh(user)
+    # Create their workspace (or join an org that invited this email).
+    orgs.ensure_membership(db, user)
     _set_session_cookie(response, str(user.id))
     return user
 
@@ -50,6 +53,7 @@ def login(payload: LoginRequest, response: Response, db: DbSession) -> User:
         payload.password, user.hashed_password
     ):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password")
+    orgs.ensure_membership(db, user)  # backfill for pre-orgs accounts / pending invites
     _set_session_cookie(response, str(user.id))
     return user
 

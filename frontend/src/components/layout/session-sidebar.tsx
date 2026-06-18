@@ -10,8 +10,11 @@ import {
 import { useState } from "react"
 import { NavLink, useNavigate } from "react-router-dom"
 
+import { useQuery } from "@tanstack/react-query"
+
 import { SettingsDialog } from "@/components/layout/settings-dialog"
 import { ThemeToggle } from "@/components/layout/theme-toggle"
+import { api } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -56,6 +59,7 @@ export function SessionSidebar({
   const logout = useLogout()
   const navigate = useNavigate()
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const { data: org } = useQuery({ queryKey: ["org"], queryFn: api.getOrg })
   const label = user?.name || user?.email || ""
 
   return (
@@ -168,7 +172,12 @@ export function SessionSidebar({
           <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium uppercase text-muted-foreground">
             {label.charAt(0) || "?"}
           </div>
-          <span className="min-w-0 flex-1 truncate text-sm text-foreground">{label}</span>
+          <div className="min-w-0 flex-1 leading-tight">
+            <span className="block truncate text-sm text-foreground">{label}</span>
+            {org ? (
+              <span className="block truncate text-xs text-muted-foreground">{org.name}</span>
+            ) : null}
+          </div>
           <IconButton
             tooltip="Settings"
             variant="ghost"

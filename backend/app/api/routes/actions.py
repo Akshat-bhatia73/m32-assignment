@@ -5,7 +5,7 @@ import uuid
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
-from app.api.deps import CurrentUser, DbSession
+from app.api.deps import CurrentMembership, DbSession
 from app.models import ActionItem, ChatSession
 from app.models.action_item import ACTION_STATUSES
 from app.schemas.action import ActionItemOut, ActionItemUpdate, ActionItemWithSession
@@ -15,15 +15,15 @@ router = APIRouter(tags=["actions"])
 
 @router.get("/actions", response_model=list[ActionItemWithSession])
 def list_all_actions(
-    current_user: CurrentUser,
+    membership: CurrentMembership,
     db: DbSession,
     status_filter: str | None = None,
 ) -> list[ActionItemWithSession]:
-    """Every action item for the current user across all sessions (overview screen)."""
+    """Every action item in the workspace across all sessions (overview screen)."""
     stmt = (
         select(ActionItem, ChatSession.title)
         .join(ChatSession, ActionItem.session_id == ChatSession.id)
-        .where(ActionItem.user_id == current_user.id)
+        .where(ActionItem.org_id == membership.org_id)
         .order_by(ActionItem.created_at.desc())
     )
     if status_filter and status_filter in ACTION_STATUSES:
@@ -40,10 +40,10 @@ def list_all_actions(
 
 @router.get("/sessions/{session_id}/actions", response_model=list[ActionItemOut])
 def list_actions(
-    session_id: uuid.UUID, current_user: CurrentUser, db: DbSession
+    session_id: uuid.UUID, membership: CurrentMembership, db: DbSession
 ) -> list[ActionItem]:
     session = db.get(ChatSession, session_id)
-    if session is None or session.user_id != current_user.id:
+    if session is None or session.org_id != membership.org_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
     rows = db.scalars(
         select(ActionItem)
@@ -53,9 +53,9 @@ def list_actions(
     return list(rows)
 
 
-def _owned_action(db: DbSession, action_id: uuid.UUID, user_id: uuid.UUID) -> ActionItem:
+def _org_action(db: DbSession, action_id: uuid.UUID, org_id: uuid.UUID) -> ActionItem:
     item = db.get(ActionItem, action_id)
-    if item is None or item.user_id != user_id:
+    if item is None or item.org_id != org_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Action item not found")
     return item
 
@@ -64,10 +64,10 @@ def _owned_action(db: DbSession, action_id: uuid.UUID, user_id: uuid.UUID) -> Ac
 def update_action(
     action_id: uuid.UUID,
     payload: ActionItemUpdate,
-    current_user: CurrentUser,
+    membership: CurrentMembership,
     db: DbSession,
 ) -> ActionItem:
-    item = _owned_action(db, action_id, current_user.id)
+    item = _org_action(db, action_id, membership.org_id)
     data = payload.model_dump(exclude_unset=True)
     if "status" in data and data["status"] not in ACTION_STATUSES:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid status")
@@ -79,7 +79,7 @@ def update_action(
 
 
 @router.delete("/actions/{action_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_action(action_id: uuid.UUID, current_user: CurrentUser, db: DbSession) -> None:
-    item = _owned_action(db, action_id, current_user.id)
+def delete_action(action_id: uuid.UUID, membership: CurrentMembership, db: DbSession) -> None:
+    item = _org_action(db, action_id, membership.org_id)
     db.delete(item)
     db.commit()

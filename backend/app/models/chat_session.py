@@ -17,6 +17,11 @@ class ChatSession(UUIDMixin, TimestampMixin, Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
+    # Org that owns this session (the workspace it's shared in). Nullable for legacy rows.
+    org_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True,
+        index=True,
+    )
     title: Mapped[str] = mapped_column(String(200), default="New session")
     # Latest external action awaiting user confirmation (send email / create events), or null.
     pending_action: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)

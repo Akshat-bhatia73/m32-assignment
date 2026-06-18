@@ -6,7 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
 from pydantic import BaseModel, ConfigDict
 
-from app.api.deps import CurrentUser, DbSession
+from app.api.deps import CurrentMembership, CurrentUser, DbSession
 from app.models import ChatSession, Meeting
 from app.services.transcript import TranscriptError, extract_transcript
 
@@ -54,9 +54,11 @@ async def extract_upload(
 
 
 @router.post("", response_model=MeetingOut, status_code=status.HTTP_201_CREATED)
-def create_meeting(payload: MeetingCreate, current_user: CurrentUser, db: DbSession) -> Meeting:
+def create_meeting(
+    payload: MeetingCreate, current_user: CurrentUser, membership: CurrentMembership, db: DbSession
+) -> Meeting:
     session = db.get(ChatSession, payload.session_id)
-    if session is None or session.user_id != current_user.id:
+    if session is None or session.org_id != membership.org_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
     meeting = Meeting(
         session_id=payload.session_id,

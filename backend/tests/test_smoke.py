@@ -21,6 +21,9 @@ def test_openapi_lists_core_routes():
         "/chat/stream",
         "/sessions",
         "/integrations/status",
+        "/calendar/events",
+        "/org",
+        "/org/invites",
     ]:
         assert expected in paths
 

@@ -71,6 +71,7 @@ async def extractor_node(state: GraphState) -> dict:
         event = board_tools.add_action_item(
             session_id=session_id,
             user_id=user_id,
+            org_id=state.get("org_id"),
             meeting_id=meeting_id,
             task=item.task,
             owner=item.owner,
