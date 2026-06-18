@@ -5,6 +5,7 @@ via the Composio seam (simulated until a key is set), updates the board, and cle
 action. This is the only place external side effects happen.
 """
 
+import logging
 import uuid
 from typing import Literal
 
@@ -15,6 +16,8 @@ from pydantic import BaseModel
 from app.agents.conversation import extract_text
 from app.agents.state import GraphState
 from app.agents.tools import board_tools, composio_tools, session_tools
+
+logger = logging.getLogger(__name__)
 
 _YES = {"yes", "y", "yep", "yeah", "yup", "sure", "ok", "okay", "go ahead", "do it",
         "send", "send it", "confirm", "confirmed", "please do", "go for it"}
@@ -88,9 +91,15 @@ async def confirm_node(state: GraphState) -> dict:
         status = result.get("status")
         writer({"kind": "tool_output", "tool_call_id": tool_call_id, "output": {"status": status}})
         if status == "error":
+            detail = result.get("error")
+            # Log the real Composio error server-side (the usual cause is the connected account's
+            # external user_id not matching the app-login email we send as).
+            logger.error("Gmail send failed for user_id=%s: %s", composio_user_id, detail)
+            hint = f" (details: {detail})" if detail else ""
             writer(
-                {"kind": "say", "text": "I couldn't send it — your Gmail account may not be "
-                 "connected yet. Once Gmail is connected in Composio, try again."}
+                {"kind": "say", "text": "I couldn't send it. Gmail may not be connected for "
+                 f"{composio_user_id}, or the connection isn't active — check Settings and try "
+                 f"again.{hint}"}
             )
             return {}  # keep the pending action so a retry works
         session_tools.set_pending_action(session_id, None)
@@ -112,12 +121,14 @@ async def confirm_node(state: GraphState) -> dict:
             }
         )
         created, failed = 0, 0
+        last_error: str | None = None
         for event in events_pending:
             res = composio_tools.create_calendar_event(
                 user_id=composio_user_id, summary=event["summary"], event_date=event["date"]
             )
             if res.get("status") == "error":
                 failed += 1
+                last_error = res.get("error") or last_error
                 continue
             board_event = board_tools.set_status(
                 event["action_item_id"], "scheduled", external_ref=res.get("event_id")
@@ -133,9 +144,14 @@ async def confirm_node(state: GraphState) -> dict:
             }
         )
         if created == 0 and failed:
+            logger.error(
+                "Calendar create failed for user_id=%s: %s", composio_user_id, last_error
+            )
+            hint = f" (details: {last_error})" if last_error else ""
             writer(
-                {"kind": "say", "text": "I couldn't add those events — your Google Calendar may "
-                 "not be connected yet. Once it's connected in Composio, try again."}
+                {"kind": "say", "text": "I couldn't add those events. Google Calendar may not be "
+                 f"connected for {composio_user_id}, or the connection isn't active — check "
+                 f"Settings and try again.{hint}"}
             )
             return {}  # keep pending for retry
         session_tools.set_pending_action(session_id, None)
