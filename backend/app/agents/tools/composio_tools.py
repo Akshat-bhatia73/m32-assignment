@@ -10,14 +10,23 @@ Tool schemas (verified against SDK 0.13.x):
                                  calendar_id, description, timezone
 """
 
+import logging
 import uuid
 from functools import lru_cache
 from typing import Any
 
 from app.config import settings
 
+logger = logging.getLogger(__name__)
+
 GMAIL_SEND = "GMAIL_SEND_EMAIL"
 CALENDAR_CREATE = "GOOGLECALENDAR_CREATE_EVENT"
+
+# Map our toolkit param to the Composio toolkit slug used for connected-account lookup.
+_TOOLKIT_FOR_SLUG = {
+    GMAIL_SEND: "gmail",
+    CALENDAR_CREATE: "googlecalendar",
+}
 
 
 def composio_enabled() -> bool:
@@ -29,6 +38,45 @@ def _client():
     from composio import Composio
 
     return Composio(api_key=settings.composio_api_key)
+
+
+def _active_connected_account_id(user_id: str, toolkit_slug: str) -> str | None:
+    """Return the ACTIVE connected_account_id for (user_id, toolkit), if any.
+
+    A user can accumulate multiple connected accounts for one toolkit (e.g. a stale
+    ``INITIALIZING`` row from an abandoned OAuth attempt alongside the real ``ACTIVE`` one).
+    Passing the ACTIVE id explicitly to ``tools.execute`` removes that ambiguity.
+    """
+    try:
+        res = _client().connected_accounts.list(
+            user_ids=[user_id], toolkit_slugs=[toolkit_slug], statuses=["ACTIVE"]
+        )
+    except Exception:  # noqa: BLE001 — lookup is best-effort; fall back to user_id routing
+        logger.exception("connected_accounts.list failed for %s/%s", user_id, toolkit_slug)
+        return None
+    items = getattr(res, "items", None) or []
+    for acc in items:
+        acc_id = getattr(acc, "id", None)
+        if acc_id:
+            return acc_id
+    return None
+
+
+def _execute(slug: str, arguments: dict[str, Any], *, user_id: str) -> dict[str, Any]:
+    """Execute a Composio tool for ``user_id``, resolving the ACTIVE account explicitly.
+
+    Centralizes two things the raw ``tools.execute`` got wrong:
+    - manual execution now requires a toolkit version, so we skip the version check (use latest);
+    - if multiple connected accounts exist for the toolkit, we target the ACTIVE one by id.
+    """
+    kwargs: dict[str, Any] = {"user_id": user_id, "dangerously_skip_version_check": True}
+    toolkit = _TOOLKIT_FOR_SLUG.get(slug)
+    if toolkit:
+        acc_id = _active_connected_account_id(user_id, toolkit)
+        if acc_id:
+            kwargs["connected_account_id"] = acc_id
+    res = _client().tools.execute(slug, arguments, **kwargs)
+    return _result(dict(res))
 
 
 def _result(res: dict) -> dict[str, Any]:
@@ -53,10 +101,9 @@ def send_gmail(*, user_id: str, to: list[str], subject: str, body: str) -> dict[
     if len(to) > 1:
         arguments["extra_recipients"] = to[1:]
     try:
-        res = _client().tools.execute(GMAIL_SEND, arguments, user_id=user_id)
+        out = _execute(GMAIL_SEND, arguments, user_id=user_id)
     except Exception as exc:  # e.g. no connected Gmail account for this user_id
         return {"status": "error", "error": str(exc), "to": to}
-    out = _result(res)
     out["to"] = to
     return out
 
@@ -83,10 +130,9 @@ def create_calendar_event(
     if description:
         arguments["description"] = description
     try:
-        res = _client().tools.execute(CALENDAR_CREATE, arguments, user_id=user_id)
+        out = _execute(CALENDAR_CREATE, arguments, user_id=user_id)
     except Exception as exc:  # e.g. no connected Google Calendar account for this user_id
         return {"status": "error", "error": str(exc), "summary": summary}
-    out = _result(res)
     data = out.get("data") or {}
     # Event id location varies; dig it out best-effort.
     out["event_id"] = (

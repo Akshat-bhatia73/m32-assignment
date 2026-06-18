@@ -88,3 +88,9 @@ export type EmailDraftEvent = {
   subject: string
   body: string
 }
+
+/** Composio connection status for the current user. */
+export type IntegrationStatus = {
+  gmail: boolean
+  googlecalendar: boolean
+}

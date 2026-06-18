@@ -3,6 +3,7 @@ import type {
   ActionItemWithSession,
   ChatMessage,
   ExtractedTranscript,
+  IntegrationStatus,
   Session,
   User,
 } from "@/lib/types"
@@ -64,6 +65,10 @@ export const api = {
   updateAction: (id: string, body: Partial<Pick<ActionItem, "status">>) =>
     request<ActionItem>(`/actions/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteAction: (id: string) => request<void>(`/actions/${id}`, { method: "DELETE" }),
+
+  getIntegrations: () => request<IntegrationStatus>("/integrations/status"),
+  connectIntegration: (toolkit: string) =>
+    request<{ url: string }>(`/integrations/${toolkit}/connect`, { method: "POST" }),
 
   extractTranscript: async (file: File): Promise<ExtractedTranscript> => {
     const form = new FormData()

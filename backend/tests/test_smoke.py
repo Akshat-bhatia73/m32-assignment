@@ -15,7 +15,13 @@ def test_health():
 
 def test_openapi_lists_core_routes():
     paths = client.get("/openapi.json").json()["paths"]
-    for expected in ["/auth/signup", "/auth/login", "/chat/stream", "/sessions"]:
+    for expected in [
+        "/auth/signup",
+        "/auth/login",
+        "/chat/stream",
+        "/sessions",
+        "/integrations/status",
+    ]:
         assert expected in paths
 
 

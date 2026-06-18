@@ -1,6 +1,16 @@
-import { CheckSquare, LayoutGrid, LogOut, MoreHorizontal, Plus, Trash2 } from "lucide-react"
+import {
+  CheckSquare,
+  LayoutGrid,
+  LogOut,
+  MoreHorizontal,
+  Plus,
+  Settings,
+  Trash2,
+} from "lucide-react"
+import { useState } from "react"
 import { NavLink, useNavigate } from "react-router-dom"
 
+import { SettingsDialog } from "@/components/layout/settings-dialog"
 import { ThemeToggle } from "@/components/layout/theme-toggle"
 import { Button } from "@/components/ui/button"
 import {
@@ -45,6 +55,7 @@ export function SessionSidebar({
   const { data: user } = useCurrentUser()
   const logout = useLogout()
   const navigate = useNavigate()
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const label = user?.name || user?.email || ""
 
   return (
@@ -158,6 +169,14 @@ export function SessionSidebar({
             {label.charAt(0) || "?"}
           </div>
           <span className="min-w-0 flex-1 truncate text-sm text-foreground">{label}</span>
+          <IconButton
+            tooltip="Settings"
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => setSettingsOpen(true)}
+          >
+            <Settings className="size-4" />
+          </IconButton>
           <ThemeToggle />
           <IconButton
             tooltip="Sign out"
@@ -170,6 +189,8 @@ export function SessionSidebar({
           </IconButton>
         </div>
       </div>
+
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
     </div>
   )
 }
