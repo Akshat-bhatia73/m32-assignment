@@ -18,6 +18,7 @@ import { EmailDraftCard } from "@/components/chat/email-draft-card"
 import { ModelSelector } from "@/components/chat/model-selector"
 import { ThinkingTrail } from "@/components/chat/thinking-trail"
 import { ToolPartView } from "@/components/chat/tool-part"
+import { Button } from "@/components/ui/button"
 import { IconButton } from "@/components/ui/icon-button"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
@@ -215,24 +216,26 @@ export function ChatPanel({
   }
 
   // Confirm + send an email draft card — routes to the confirm node, which sends via Gmail.
-  function sendEmailDraft(messageId: string, draftCount: number) {
+  function sendEmailDraft(cardId: string, draftId?: string) {
+    if (busy) return
+    setSentDrafts((current) => new Set(current).add(cardId))
+    decide(draftId ? `Send draft ${draftId}` : "Send it")
+  }
+
+  function declineEmailDraft(cardId: string, draftId?: string) {
+    if (busy) return
+    setDeclinedDrafts((current) => new Set(current).add(cardId))
+    decide(draftId ? `Dismiss draft ${draftId}` : "Cancel")
+  }
+
+  function sendAllEmailDrafts(messageId: string, count: number) {
     if (busy) return
     setSentDrafts((current) => {
       const next = new Set(current)
-      for (let index = 0; index < draftCount; index++) next.add(`${messageId}:${index}`)
+      for (let index = 0; index < count; index++) next.add(`${messageId}:${index}`)
       return next
     })
-    decide("Send it")
-  }
-
-  function declineEmailDraft(messageId: string, draftCount: number) {
-    if (busy) return
-    setDeclinedDrafts((current) => {
-      const next = new Set(current)
-      for (let index = 0; index < draftCount; index++) next.add(`${messageId}:${index}`)
-      return next
-    })
-    decide("Cancel")
+    decide("Send all drafts")
   }
 
   // Confirm a calendar proposal card — routes to the confirm node, which creates the events.
@@ -386,11 +389,20 @@ export function ChatPanel({
                               sent={sentDrafts.has(draftId)}
                               declined={declinedDrafts.has(draftId)}
                               busy={busy || readOnly}
-                              onSend={() => sendEmailDraft(message.id, emailDrafts.length)}
-                              onDecline={() => declineEmailDraft(message.id, emailDrafts.length)}
+                              onSend={() => sendEmailDraft(draftId, draft.draft_id)}
+                              onDecline={() => declineEmailDraft(draftId, draft.draft_id)}
                             />
                           )
                         })}
+                        {emailDrafts.length > 1 ? (
+                          <Button
+                            size="sm"
+                            disabled={busy || readOnly}
+                            onClick={() => sendAllEmailDrafts(message.id, emailDrafts.length)}
+                          >
+                            Send all drafts
+                          </Button>
+                        ) : null}
                         {proposal ? (
                           <CalendarProposalCard
                             proposal={proposal}

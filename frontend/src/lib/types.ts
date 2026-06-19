@@ -94,6 +94,7 @@ export type StatusEvent = {
 
 /** Payload of a streamed `data-email-draft` part (a follow-up email awaiting send). */
 export type EmailDraftEvent = {
+  draft_id?: string
   to: string[]
   subject: string
   body: string

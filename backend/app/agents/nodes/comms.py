@@ -584,7 +584,12 @@ async def _draft_email(state: GraphState, message: str) -> dict:
     for draft in plan.drafts:
         proposed = sorted({email.lower() for email in draft.to if email.lower() in allowed})
         drafts.append(
-            {"to": proposed or to, "subject": draft.subject, "body": draft.body}
+            {
+                "draft_id": uuid.uuid4().hex,
+                "to": proposed or to,
+                "subject": draft.subject,
+                "body": draft.body,
+            }
         )
     if any(not draft["to"] for draft in drafts):
         writer({"kind": "say", "text": "Who should I send these to? Tell me the email addresses "

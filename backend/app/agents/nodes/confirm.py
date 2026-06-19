@@ -6,6 +6,7 @@ action. This is the only place external side effects happen.
 """
 
 import logging
+import re
 import uuid
 from typing import Literal
 
@@ -61,6 +62,19 @@ async def confirm_node(state: GraphState) -> dict:
     pending = state.get("pending_action") or {}
     message = extract_text(state["messages"][-1].content)
 
+    # Card actions can target one draft without affecting the rest of the pending batch.
+    if pending.get("type") == "send_emails":
+        dismiss_match = re.fullmatch(r"dismiss draft ([a-f0-9]+)", message.strip().lower())
+        if dismiss_match:
+            draft_id = dismiss_match.group(1)
+            remaining = [d for d in pending.get("drafts", []) if d.get("draft_id") != draft_id]
+            session_tools.set_pending_action(
+                session_id,
+                {"type": "send_emails", "drafts": remaining} if remaining else None,
+            )
+            writer({"kind": "say", "text": "Dismissed that draft. Nothing was sent."})
+            return {}
+
     decision = await _decide(message)
     if decision == "no":
         session_tools.set_pending_action(session_id, None)
@@ -97,7 +111,14 @@ async def confirm_node(state: GraphState) -> dict:
         return {"meeting_id": meeting_id, "extracted": created}
 
     if action_type in {"send_email", "send_emails"}:
-        drafts = pending.get("drafts") or [pending]
+        all_drafts = pending.get("drafts") or [pending]
+        target_match = re.fullmatch(r"send draft ([a-f0-9]+)", message.strip().lower())
+        target_id = target_match.group(1) if target_match else None
+        drafts = [d for d in all_drafts if not target_id or d.get("draft_id") == target_id]
+        untouched = [d for d in all_drafts if target_id and d.get("draft_id") != target_id]
+        if not drafts:
+            writer({"kind": "say", "text": "That draft is no longer pending."})
+            return {}
         tool_call_id = uuid.uuid4().hex
         writer(
             {
@@ -137,9 +158,10 @@ async def confirm_node(state: GraphState) -> dict:
                  f"again.{hint}"}
             )
             return {}  # keep the pending action so a retry works
+        remaining = untouched + failed_drafts
         session_tools.set_pending_action(
             session_id,
-            {"type": "send_emails", "drafts": failed_drafts} if failed_drafts else None,
+            {"type": "send_emails", "drafts": remaining} if remaining else None,
         )
         sim = " (simulated — add a Composio key to send for real)" if simulated else ""
         tail = f" {failed} failed." if failed else ""
