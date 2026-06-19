@@ -7,6 +7,8 @@ from app.agents.nodes.comms import (
     _existing_intervals,
     _resolve_owner_emails,
 )
+from app.agents.nodes.respond import _pending_context
+from app.agents.nodes.router import _is_explicit_confirmation
 from app.api.routes.chat import _message_context
 from app.services.transcript import _clean_captions
 
@@ -14,6 +16,23 @@ MEMBERS = [
     {"id": "1", "name": "Priya Sharma", "email": "priya@acme.com", "role": "owner"},
     {"id": "2", "name": "David Lee", "email": "david@acme.com", "role": "member"},
 ]
+
+
+def test_confirmation_gate_rejects_questions_and_corrections():
+    assert _is_explicit_confirmation("yes")
+    assert _is_explicit_confirmation("send it")
+    assert _is_explicit_confirmation("no")
+    assert not _is_explicit_confirmation("Don't we have to send it to Priya?")
+    assert not _is_explicit_confirmation("Yes, but change the recipient first")
+    assert not _is_explicit_confirmation("Is this going to Priya?")
+
+
+def test_pending_email_context_is_available_to_chat():
+    context = _pending_context(
+        {"type": "send_email", "to": ["wrong@example.com"], "subject": "Kickoff"}
+    )
+    assert "not sent" in context
+    assert "wrong@example.com" in context
 
 
 def test_message_context_restores_attachment_contents_for_follow_up_turns():

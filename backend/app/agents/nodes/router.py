@@ -52,6 +52,32 @@ _ROUTE_STEPS = {
     "chat": "Thinking",
 }
 
+_CONFIRM_YES = {
+    "yes",
+    "y",
+    "yep",
+    "yeah",
+    "yup",
+    "sure",
+    "ok",
+    "okay",
+    "go ahead",
+    "do it",
+    "send",
+    "send it",
+    "confirm",
+    "confirmed",
+    "please do",
+    "go for it",
+}
+_CONFIRM_NO = {"no", "n", "nope", "cancel", "stop", "don't", "dont", "not now", "hold off", "wait"}
+
+
+def _is_explicit_confirmation(message: str) -> bool:
+    """Only short, unambiguous confirmation replies may execute a pending action."""
+    normalized = message.strip().lower().rstrip("!.")
+    return normalized in _CONFIRM_YES or normalized in _CONFIRM_NO
+
 
 async def router_node(state: GraphState) -> dict:
     writer = get_stream_writer()
@@ -71,8 +97,9 @@ async def router_node(state: GraphState) -> dict:
         ]
     )
     route = decision.route
-    # Guard: 'confirm' only makes sense with a pending action.
-    if route == "confirm" and not pending:
+    # Safety boundary: pending state must not turn questions, corrections, or discussion into
+    # approval. Only a small explicit phrase can enter the side-effecting confirmation node.
+    if route == "confirm" and (not pending or not _is_explicit_confirmation(last)):
         route = "chat"
     writer({"kind": "status", "node": route, "label": _ROUTE_STEPS.get(route, "Working")})
     return {"route": route}
