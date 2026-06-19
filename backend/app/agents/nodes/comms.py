@@ -4,8 +4,10 @@ Nothing external happens here. It prepares the action, stores it as the session'
 and streams a plain-language draft + a confirmation prompt. The confirm node executes on "yes".
 """
 
+import re
 import uuid
 from datetime import UTC, date, datetime, time, timedelta
+from typing import Literal
 from zoneinfo import ZoneInfo
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -18,7 +20,7 @@ from app.agents.state import GraphState
 from app.agents.tools import board_tools, composio_tools, session_tools
 from app.config import settings
 
-_SCHEDULE_HINTS = ("schedul", "calendar", "event", "invite", "block time", "add to my cal")
+EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 
 # Proposed events default to a 9:00, 30-minute block (mirrors create_calendar_event).
 _EVENT_HOUR = 9
@@ -76,73 +78,60 @@ def _conflict_for(event_date: str, intervals: list[tuple[datetime, datetime, str
     return None
 
 EMAIL_SYSTEM = (
-    "You draft a short, warm, professional follow-up email for a small-business owner, summarizing "
-    "the meeting's action items. Plain language, no jargon.\n\n"
-    "Return a concise subject line and a plain-text body. Format the body EXACTLY like this, using "
-    "real newline characters (\\n) — never run the list together on one line:\n"
-    "Hi team,\n\n"
-    "<one short intro sentence>\n\n"
-    "- <action item> — <Owner>, due <date>\n"
-    "- <next action item> — <Owner>, due <date>\n\n"
-    "<one short closing sentence>\n\n"
+    "You draft a short, warm, professional email on the user's behalf. Plain language, no jargon. "
+    "Write the email the user actually asked for: if it's a meeting follow-up, summarize the "
+    "action items provided; otherwise write about whatever they described.\n\n"
+    "Return a concise subject line and a plain-text body using real newline characters (\\n). "
+    "Structure it as:\n"
+    "<greeting>\n\n"
+    "<short intro / purpose>\n\n"
+    "<body — if you list tasks or points, put each on its OWN line starting with '- '>\n\n"
+    "<short closing>\n\n"
     "Thanks,\n"
     "<sender name>\n\n"
-    "Rules: put each action item on its OWN line starting with '- '. Omit 'due <date>' when there "
-    "is no due date, and omit the owner when none is given. Sign off with 'Thanks,' on its own "
-    "line followed by the sender's name on the next line. Keep the whole body under ~150 words.\n"
-    "Summarize ONLY the action items provided — do not invent or add tasks, people, dates, "
-    "numbers, decisions, or commitments that are not in the list."
+    "Rules: never run a list together on one line. Sign off with 'Thanks,' on its own line then "
+    "the sender's name on the next line. Keep the body under ~150 words. Use ONLY facts the user "
+    "gave (in their request or the conversation) and the action items provided — do NOT invent "
+    "recipient names, dates, numbers, decisions, or commitments."
 )
 
 
 class EmailDraft(BaseModel):
     subject: str = Field(description="Concise subject line.")
     body: str = Field(
-        description="Email body as plain text with real newlines; each action item on its own "
-        "line, signed off with the sender's name."
+        description="Email body as plain text with real newlines; any list on its own lines, "
+        "signed off with the sender's name."
     )
 
 
-def _wants_schedule(message: str) -> bool:
-    low = message.lower()
-    return any(h in low for h in _SCHEDULE_HINTS)
+class CommsIntent(BaseModel):
+    intent: Literal["email", "schedule", "reschedule", "cancel", "calendar_view"]
 
 
-_RESCHEDULE_HINTS = ("reschedul", "move the", "move my", "push back", "push the", "shift the",
-                     "change the time", "move it", "bump the", "rename the", "retitle",
-                     "change the title", "change the name")
+async def _classify_comms(state: GraphState, message: str) -> str:
+    """Pick the comms sub-intent with an LLM (robust to topic words like 'schedule' inside an
+    email request) — replaces brittle keyword matching."""
+    from app.llm.provider import get_llm
 
-_CANCEL_HINTS = ("cancel", "delete", "remove", "call off", "drop the", "take off",
-                 "get rid of", "clear the")
-_EVENT_WORDS = ("event", "meeting", "calendar", "invite", "appointment", "booking")
-
-
-def _wants_reschedule(message: str) -> bool:
-    low = message.lower()
-    return any(h in low for h in _RESCHEDULE_HINTS)
-
-
-def _wants_cancel_event(message: str) -> bool:
-    """True for 'cancel/remove the calendar event' style requests (not 'remove a task')."""
-    low = message.lower()
-    return any(h in low for h in _CANCEL_HINTS) and any(w in low for w in _EVENT_WORDS)
-
-
-# Calendar-view phrasings ("what's on my calendar"), guarded against creation requests so
-# "add this to my calendar" still schedules instead of just listing.
-_VIEW_HINTS = ("what's on my", "whats on my", "what is on my", "what events", "what meetings",
-               "what do i have", "what's coming up", "whats coming up", "show me my",
-               "show my", "my schedule", "my agenda", "list my event", "any events",
-               "events today", "events for today", "on my calendar", "check my calendar",
-               "view my calendar", "see my calendar", "look at my calendar")
-_VIEW_GUARD = ("schedul", "add ", "create", "set up", "block ", "book ", "put ")
-
-
-def _wants_calendar_view(message: str) -> bool:
-    low = message.lower()
-    if any(g in low for g in _VIEW_GUARD):
-        return False
-    return any(h in low for h in _VIEW_HINTS)
+    llm = get_llm(temperature=0.0).with_structured_output(CommsIntent)
+    res: CommsIntent = await llm.ainvoke([
+        SystemMessage(content=(
+            "Classify the user's request in an email + calendar assistant. Pick ONE intent based "
+            "on the ACTION the user wants, NOT on topic words mentioned in passing:\n"
+            "- 'email': write, draft, or send an email/message to someone — even if the email's "
+            "topic happens to mention scheduling, meetings, or events.\n"
+            "- 'schedule': add the user's existing action items / tasks to their calendar.\n"
+            "- 'reschedule': move, rename, or change the time of an existing calendar event.\n"
+            "- 'cancel': delete or remove existing calendar events.\n"
+            "- 'calendar_view': look at, list, or check what's on the user's calendar.\n"
+            "Example: 'draft an email about whether to schedule a war room' → 'email' (the action "
+            "is drafting an email)."
+        )),
+        HumanMessage(content=(
+            f"Recent conversation:\n{_recent_context(state)}\n\nLatest request:\n{message}"
+        )),
+    ])
+    return res.intent
 
 
 class RescheduleParse(BaseModel):
@@ -428,163 +417,150 @@ async def _cancel_event(state: GraphState, message: str) -> dict:
     return {}
 
 
-async def comms_node(state: GraphState) -> dict:
+async def _schedule_board(state: GraphState, message: str) -> dict:
+    """Plan calendar events from the board's dated open items, flagging conflicts up front."""
+    writer = get_stream_writer()
+    session_id = state["session_id"]
+    open_items = board_tools.list_items(session_id, open_only=True)
+
+    tool_call_id = uuid.uuid4().hex
+    writer({"kind": "tool_input", "tool_call_id": tool_call_id,
+            "tool_name": "plan_calendar_events", "input": {"open_items": len(open_items)}})
+    dated = [i for i in open_items if i.get("due_date")]
+    if not dated:
+        writer({"kind": "tool_output", "tool_call_id": tool_call_id, "output": {"events": 0}})
+        writer({"kind": "say", "text": "None of your open items have a due date yet, so there's "
+                "nothing to schedule. Add due dates and I'll set up the calendar events."})
+        session_tools.set_pending_action(session_id, None)
+        return {}
+    events = [
+        {"action_item_id": i["id"], "summary": i["task"], "date": i["due_date"]} for i in dated
+    ]
+    # Read the user's existing agenda over the proposed window to flag overlaps up front.
+    intervals: list[tuple[datetime, datetime, str]] = []
+    user_email = state.get("user_email")
+    dates = sorted(e["date"] for e in events)
+    if user_email and dates:
+        tz = _tz()
+        time_min = datetime.combine(date.fromisoformat(dates[0]), time.min, tz)
+        time_max = datetime.combine(
+            date.fromisoformat(dates[-1]) + timedelta(days=1), time.min, tz
+        )
+        listed = composio_tools.list_calendar_events(
+            user_id=user_email,
+            time_min=time_min.astimezone(UTC).isoformat(),
+            time_max=time_max.astimezone(UTC).isoformat(),
+        )
+        if listed.get("status") == "ok":
+            intervals = _existing_intervals(listed.get("events", []))
+
+    tz = _tz()
+    for e in events:
+        start = datetime.combine(date.fromisoformat(e["date"]), time(_EVENT_HOUR, 0), tz)
+        e["start"] = start.isoformat()
+        e["conflict"] = _conflict_for(e["date"], intervals)
+
+    writer({"kind": "tool_output", "tool_call_id": tool_call_id,
+            "output": {"events": len(events)}})
+    session_tools.set_pending_action(session_id, {"type": "create_events", "events": events})
+    # Structured part → the client renders a calendar proposal card with ⚠ conflict badges.
+    writer({"kind": "calendar_proposal", "events": [
+        {"summary": e["summary"], "date": e["date"], "start": e["start"], "conflict": e["conflict"]}
+        for e in events
+    ]})
+    n_conflicts = sum(1 for e in events if e["conflict"])
+    lines = "\n".join(
+        f"• {e['summary']} — {e['date']} at {_EVENT_HOUR}:00"
+        + (f" ⚠ overlaps “{e['conflict']}”" if e["conflict"] else "")
+        for e in events
+    )
+    warn = (
+        f"\n\n{n_conflicts} of these overlap an existing event — you can reschedule after, "
+        "or tell me a different time."
+        if n_conflicts
+        else ""
+    )
+    writer({"kind": "say", "text": f"I can add {len(events)} calendar event"
+            f"{'s' if len(events) != 1 else ''}:\n{lines}{warn}\n\nApprove below to add them, "
+            "or tell me what to change."})
+    return {}
+
+
+async def _draft_email(state: GraphState, message: str) -> dict:
+    """Draft ANY email the user asks for — a meeting follow-up or a custom message to a named
+    recipient — then queue it for one-click send."""
     from app.llm.provider import get_llm
 
     writer = get_stream_writer()
     session_id = state["session_id"]
-    message = extract_text(state["messages"][-1].content)
+    organizer = state.get("user_email")
     open_items = board_tools.list_items(session_id, open_only=True)
-
-    if _wants_cancel_event(message):
-        return await _cancel_event(state, message)
-
-    if _wants_reschedule(message):
-        return await _reschedule(state, message)
-
-    if _wants_calendar_view(message):
-        return await _calendar_view(state, message)
-
-    if _wants_schedule(message):
-        tool_call_id = uuid.uuid4().hex
-        writer(
-            {
-                "kind": "tool_input",
-                "tool_call_id": tool_call_id,
-                "tool_name": "plan_calendar_events",
-                "input": {"open_items": len(open_items)},
-            }
-        )
-        dated = [i for i in open_items if i.get("due_date")]
-        if not dated:
-            writer({"kind": "tool_output", "tool_call_id": tool_call_id, "output": {"events": 0}})
-            writer(
-                {"kind": "say", "text": "None of your open items have a due date yet, so there's "
-                 "nothing to schedule. Add due dates and I'll set up the calendar events."}
-            )
-            session_tools.set_pending_action(session_id, None)
-            return {}
-        events = [
-            {"action_item_id": i["id"], "summary": i["task"], "date": i["due_date"]}
-            for i in dated
-        ]
-        # Read the user's existing agenda over the proposed window to flag overlaps up front.
-        intervals: list[tuple[datetime, datetime, str]] = []
-        user_email = state.get("user_email")
-        dates = sorted(e["date"] for e in events)
-        if user_email and dates:
-            tz = _tz()
-            time_min = datetime.combine(date.fromisoformat(dates[0]), time.min, tz)
-            time_max = datetime.combine(
-                date.fromisoformat(dates[-1]) + timedelta(days=1), time.min, tz
-            )
-            listed = composio_tools.list_calendar_events(
-                user_id=user_email,
-                time_min=time_min.astimezone(UTC).isoformat(),
-                time_max=time_max.astimezone(UTC).isoformat(),
-            )
-            if listed.get("status") == "ok":
-                intervals = _existing_intervals(listed.get("events", []))
-
-        tz = _tz()
-        for e in events:
-            start = datetime.combine(
-                date.fromisoformat(e["date"]), time(_EVENT_HOUR, 0), tz
-            )
-            e["start"] = start.isoformat()
-            e["conflict"] = _conflict_for(e["date"], intervals)
-
-        writer(
-            {"kind": "tool_output", "tool_call_id": tool_call_id, "output": {"events": len(events)}}
-        )
-        session_tools.set_pending_action(
-            session_id, {"type": "create_events", "events": events}
-        )
-        # Structured part → the client renders a calendar proposal card with ⚠ conflict badges.
-        writer(
-            {"kind": "calendar_proposal", "events": [
-                {"summary": e["summary"], "date": e["date"], "start": e["start"],
-                 "conflict": e["conflict"]}
-                for e in events
-            ]}
-        )
-        n_conflicts = sum(1 for e in events if e["conflict"])
-        lines = "\n".join(
-            f"• {e['summary']} — {e['date']} at {_EVENT_HOUR}:00"
-            + (f" ⚠ overlaps “{e['conflict']}”" if e["conflict"] else "")
-            for e in events
-        )
-        warn = (
-            f"\n\n{n_conflicts} of these overlap an existing event — you can reschedule after, "
-            "or tell me a different time."
-            if n_conflicts
-            else ""
-        )
-        writer(
-            {"kind": "say", "text": f"I can add {len(events)} calendar event"
-             f"{'s' if len(events) != 1 else ''}:\n{lines}{warn}\n\nApprove below to add them, "
-             "or tell me what to change."}
-        )
-        return {}
-
-    # Email follow-up
-    if not open_items:
-        writer({"kind": "say", "text": "There are no open action items to summarize yet."})
-        return {}
+    members = state.get("members") or []
 
     tool_call_id = uuid.uuid4().hex
-    writer(
-        {
-            "kind": "tool_input",
-            "tool_call_id": tool_call_id,
-            "tool_name": "draft_followup_email",
-            "input": {"items": len(open_items)},
-        }
-    )
+    writer({"kind": "tool_input", "tool_call_id": tool_call_id, "tool_name": "draft_email",
+            "input": {"request": message[:200]}})
 
-    llm = get_llm(temperature=0.4).with_structured_output(EmailDraft)
+    sender = state.get("user_name") or ((organizer or "").split("@")[0] or "The team")
     item_lines = "\n".join(
         f"- {i['task']}"
         + (f" (owner: {i['owner']})" if i.get("owner") else "")
         + (f", due {i['due_date']}" if i.get("due_date") else "")
         for i in open_items
-    )
-    # Sign the email with the sender's real name (fall back to the email's local part).
-    sender = state.get("user_name") or (
-        (state.get("user_email") or "").split("@")[0] or "The team"
-    )
-    draft: EmailDraft = await llm.ainvoke(
-        [
-            SystemMessage(content=EMAIL_SYSTEM),
-            HumanMessage(
-                content=f"Sender name (use in the sign-off): {sender}\n\n"
-                f"Action items:\n{item_lines}"
-            ),
-        ]
-    )
-    writer(
-        {"kind": "tool_output", "tool_call_id": tool_call_id, "output": {"subject": draft.subject}}
-    )
-    organizer = state.get("user_email")
-    if not organizer:
-        writer({"kind": "say", "text": "I don't have an email address on file to send this to."})
+    ) or "(no action items on the board)"
+    llm = get_llm(temperature=0.4).with_structured_output(EmailDraft)
+    draft: EmailDraft = await llm.ainvoke([
+        SystemMessage(content=EMAIL_SYSTEM),
+        HumanMessage(content=(
+            f"Sender name (use in the sign-off): {sender}\n\n"
+            f"Write the email the user is asking for. Their request:\n{message}\n\n"
+            f"Recent conversation (context):\n{_recent_context(state)}\n\n"
+            f"Action items on the board (use ONLY if relevant to the request):\n{item_lines}"
+        )),
+    ])
+    writer({"kind": "tool_output", "tool_call_id": tool_call_id,
+            "output": {"subject": draft.subject}})
+
+    # Recipients: an address the user named wins; otherwise fall back to item owners + the
+    # organizer (the meeting-follow-up default).
+    explicit = sorted({e.lower() for e in EMAIL_RE.findall(message)})
+    if explicit:
+        to = explicit
+    else:
+        fallback = _resolve_owner_emails(open_items, members)
+        if organizer:
+            fallback = fallback | {organizer}
+        to = sorted(fallback)
+    if not to:
+        writer({"kind": "say", "text": "Who should I send this to? Tell me an email address and "
+                "I'll draft it."})
         return {}
-    # Resolve each item's owner to a real teammate email; the follow-up goes to the owners
-    # (with the organizer always included), not just the sender's own inbox.
-    members = state.get("members") or []
-    owner_emails = _resolve_owner_emails(open_items, members)
-    to = sorted(owner_emails | {organizer})
+
     session_tools.set_pending_action(
         session_id,
         {"type": "send_email", "to": to, "subject": draft.subject, "body": draft.body},
     )
     # Structured part → the client renders an editable email card with a "Send" action.
     writer({"kind": "email_draft", "to": to, "subject": draft.subject, "body": draft.body})
-    # Plain-text twin: persisted for history and shown as a graceful fallback on reload
-    # (when the data part isn't replayed). The client hides it while the card is present.
-    writer(
-        {"kind": "say", "text": "Here's a draft follow-up:\n\n"
-         f"To: {', '.join(to)}\nSubject: {draft.subject}\n\n{draft.body}\n\n"
-         "Use the buttons below to send it, or tell me what to change."}
-    )
+    # Plain-text twin: persisted for history, shown as a fallback on reload.
+    writer({"kind": "say", "text": "Here's a draft:\n\n"
+            f"To: {', '.join(to)}\nSubject: {draft.subject}\n\n{draft.body}\n\n"
+            "Use the buttons below to send it, or tell me what to change."})
     return {}
+
+
+# Dispatch table for the LLM-classified comms sub-intent.
+_COMMS_HANDLERS = {
+    "calendar_view": _calendar_view,
+    "cancel": _cancel_event,
+    "reschedule": _reschedule,
+    "schedule": _schedule_board,
+    "email": _draft_email,
+}
+
+
+async def comms_node(state: GraphState) -> dict:
+    message = extract_text(state["messages"][-1].content)
+    intent = await _classify_comms(state, message)
+    handler = _COMMS_HANDLERS.get(intent, _draft_email)
+    return await handler(state, message)
