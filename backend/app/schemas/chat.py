@@ -61,6 +61,9 @@ class ChatRequest(BaseModel):
     # When true, re-run the last user turn and replace the last assistant reply (retry),
     # rather than recording a new user message.
     regenerate: bool = False
+    # UI card decisions are control messages, not conversational user turns. They still run
+    # through the graph, but must never be persisted or rendered as chat messages.
+    action: bool = False
     # The conversation model the user picked (catalog id); None falls back to the server default.
     model: str | None = None
     # Reasoning effort for reasoning-capable models ("low" | "medium" | "high"); ignored otherwise.

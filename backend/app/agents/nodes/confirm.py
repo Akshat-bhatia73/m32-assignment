@@ -31,6 +31,9 @@ class Affirmation(BaseModel):
 
 def _quick_decision(message: str) -> str | None:
     low = message.strip().lower().rstrip("!.")
+    # A click on a specific draft is itself the single approval. Do not ask for a second yes/no.
+    if re.fullmatch(r"send draft [a-f0-9]+", low) or low == "send all drafts":
+        return "yes"
     if low in _YES:
         return "yes"
     if low in _NO:

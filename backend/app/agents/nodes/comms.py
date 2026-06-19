@@ -570,16 +570,12 @@ async def _draft_email(state: GraphState, message: str) -> dict:
     writer({"kind": "tool_output", "tool_call_id": tool_call_id,
             "output": {"drafts": len(plan.drafts)}})
 
-    # Recipients: an address the user named wins; otherwise fall back to item owners + the
-    # organizer (the meeting-follow-up default).
+    # Recipients come from the request or the people responsible for relevant action items.
+    # The organizer is the sender and must never silently become the recipient.
     fallback = _resolve_owner_emails(open_items, members)
-    if organizer:
-        fallback = fallback | {organizer}
     to = _email_recipients(message, members, state.get("pending_action"), fallback)
     allowed = {member["email"].lower() for member in members if member.get("email")}
     allowed |= {email.lower() for email in EMAIL_RE.findall(message)}
-    if organizer:
-        allowed.add(organizer.lower())
     drafts = []
     for draft in plan.drafts:
         proposed = sorted({email.lower() for email in draft.to if email.lower() in allowed})

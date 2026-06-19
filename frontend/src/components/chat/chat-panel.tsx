@@ -142,6 +142,7 @@ export function ChatPanel({
             regenerate: trigger === "regenerate-message",
             model: activeModel(ms)?.id ?? null,
             reasoning: activeReasoning(ms),
+            action: Boolean((last?.metadata as { action?: boolean } | undefined)?.action),
           },
         }
       },
@@ -212,7 +213,7 @@ export function ChatPanel({
   function decide(text: string) {
     if (readOnly) return
     clearRecent()
-    sendMessage({ text, metadata: { createdAt: new Date().toISOString() } })
+    sendMessage({ text, metadata: { action: true } })
   }
 
   // Confirm + send an email draft card — routes to the confirm node, which sends via Gmail.
@@ -323,6 +324,7 @@ export function ChatPanel({
             <EmptyState />
           ) : (
             messages.map((message, mi) => {
+              if ((message.metadata as { action?: boolean } | undefined)?.action) return null
               const isAssistant = message.role === "assistant"
               const isLast = mi === lastIndex
               const isStreaming = isLast && busy

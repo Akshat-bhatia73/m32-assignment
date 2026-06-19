@@ -13,6 +13,7 @@ export const router = createBrowserRouter([
     element: <ProtectedRoute />,
     children: [
       { path: "/", element: <WorkspacePage /> },
+      { path: "/session/:sessionId", element: <WorkspacePage /> },
       { path: "/overview", element: <OverviewPage /> },
     ],
   },

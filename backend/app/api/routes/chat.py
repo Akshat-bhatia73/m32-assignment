@@ -84,6 +84,13 @@ def chat_stream(
             (m.role, _message_context(m))
             for m in (rows[:-1] if rows and rows[-1].role == "user" else rows)
         ]
+    elif payload.action:
+        # Card clicks are transport-level commands (approve/dismiss a prepared action), not words
+        # the user typed. Keep them out of both the transcript and subsequent LLM history.
+        rows = db.scalars(
+            select(Message).where(Message.session_id == session.id).order_by(Message.created_at)
+        ).all()
+        history = [(m.role, _message_context(m)) for m in rows]
     else:
         # Persist the user turn first so it survives a dropped connection.
         user_msg = Message(

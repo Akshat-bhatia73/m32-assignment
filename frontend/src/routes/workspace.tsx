@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import type { UIMessage } from "ai"
 import { useCallback, useEffect, useRef, useState } from "react"
-import { useSearchParams } from "react-router-dom"
+import { useNavigate, useParams } from "react-router-dom"
 
 import { RightSidebar } from "@/components/board/right-sidebar"
 import { ChatPanel } from "@/components/chat/chat-panel"
@@ -37,20 +37,14 @@ export function WorkspacePage() {
   const queryClient = useQueryClient()
   const setAll = useBoardStore((s) => s.setAll)
   const reset = useBoardStore((s) => s.reset)
-  const [searchParams, setSearchParams] = useSearchParams()
+  const navigate = useNavigate()
+  const { sessionId } = useParams<{ sessionId: string }>()
   const [mobilePane, setMobilePane] = useState<MobilePane>("chat")
-  // Honor a ?session=<id> deep link (e.g. "Open" from the overview screen) on first load.
-  const [selectedId, setSelectedId] = useState<string | null>(searchParams.get("session"))
   const creatingRef = useRef(false)
 
   const sessionsQuery = useQuery({ queryKey: ["sessions"], queryFn: api.listSessions })
   const sessions = sessionsQuery.data
   const { data: currentUser } = useCurrentUser()
-
-  // The deep-link param is consumed into state above; drop it so the URL stays clean.
-  useEffect(() => {
-    if (searchParams.get("session")) setSearchParams({}, { replace: true })
-  }, [searchParams, setSearchParams])
 
   // Ensure there's always at least one session to work in (create one when the user has none).
   useEffect(() => {
@@ -58,14 +52,19 @@ export function WorkspacePage() {
     creatingRef.current = true
     api.createSession().then((s) => {
       queryClient.setQueryData<Session[]>(["sessions"], [s])
-      setSelectedId(s.id)
+      navigate(`/session/${s.id}`, { replace: true })
       creatingRef.current = false
     })
-  }, [sessions, queryClient])
+  }, [sessions, queryClient, navigate])
 
   // Effective selection: the chosen session if still present, otherwise the most recent.
   const currentId =
-    selectedId && sessions?.some((s) => s.id === selectedId) ? selectedId : sessions?.[0]?.id
+    sessionId && sessions?.some((s) => s.id === sessionId) ? sessionId : sessions?.[0]?.id
+
+  // Canonicalize the workspace and stale/deleted session URLs to the selected session route.
+  useEffect(() => {
+    if (currentId && sessionId !== currentId) navigate(`/session/${currentId}`, { replace: true })
+  }, [currentId, sessionId, navigate])
 
   const messagesQuery = useQuery({
     queryKey: ["messages", currentId],
@@ -105,23 +104,25 @@ export function WorkspacePage() {
   const handleNew = useCallback(async () => {
     const s = await api.createSession()
     queryClient.setQueryData<Session[]>(["sessions"], (prev) => [s, ...(prev ?? [])])
-    setSelectedId(s.id)
+    navigate(`/session/${s.id}`)
     setMobilePane("chat")
-  }, [queryClient])
+  }, [queryClient, navigate])
 
   const handleSelect = useCallback((id: string) => {
-    setSelectedId(id)
+    navigate(`/session/${id}`)
     setMobilePane("chat")
-  }, [])
+  }, [navigate])
 
   const handleDelete = useCallback(
     async (id: string) => {
       await api.deleteSession(id)
       const remaining = (sessions ?? []).filter((s) => s.id !== id)
       queryClient.setQueryData<Session[]>(["sessions"], remaining)
-      if (selectedId === id) setSelectedId(remaining[0]?.id ?? null)
+      if (sessionId === id) {
+        navigate(remaining[0] ? `/session/${remaining[0].id}` : "/", { replace: true })
+      }
     },
-    [sessions, selectedId, queryClient]
+    [sessions, sessionId, queryClient, navigate]
   )
 
   // Live auto-title from the chat stream → update the sidebar in place.

@@ -68,7 +68,7 @@ export function OverviewPage() {
                 variant="ghost"
                 size="sm"
                 className="-ml-2 mb-1 gap-1.5 text-muted-foreground"
-                onClick={() => navigate("/")}
+                onClick={() => navigate(-1)}
               >
                 <ArrowLeft className="size-4" />
                 Back to workspace
@@ -117,7 +117,7 @@ export function OverviewPage() {
                       variant="ghost"
                       size="sm"
                       className="shrink-0 gap-1 text-muted-foreground"
-                      onClick={() => navigate(`/?session=${group.session_id}`)}
+                      onClick={() => navigate(`/session/${group.session_id}`)}
                     >
                       Open
                       <ArrowRight className="size-3.5" />
