@@ -19,6 +19,17 @@ _DEFAULT_TITLES = {"New session", "Workspace", ""}
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 
+def _message_context(message: Message) -> str:
+    """Rebuild the text the agent originally saw for a persisted user turn."""
+    if message.role != "user" or not message.artifacts:
+        return message.content
+    blob = "\n\n".join(
+        f"--- {artifact.get('name', 'Attachment')} ---\n{artifact.get('content', '')}"
+        for artifact in message.artifacts
+    )
+    return f"{message.content}\n\n{blob}".strip() if message.content.strip() else blob
+
+
 @router.post("/stream")
 def chat_stream(
     payload: ChatRequest,
@@ -70,7 +81,7 @@ def chat_stream(
         ).all()
         # Exclude the trailing user message — it's the turn we're re-running.
         history = [
-            (m.role, m.content)
+            (m.role, _message_context(m))
             for m in (rows[:-1] if rows and rows[-1].role == "user" else rows)
         ]
     else:
@@ -88,7 +99,7 @@ def chat_stream(
         rows = db.scalars(
             select(Message).where(Message.session_id == session.id).order_by(Message.created_at)
         ).all()
-        history = [(m.role, m.content) for m in rows if m.id != user_msg.id]
+        history = [(m.role, _message_context(m)) for m in rows if m.id != user_msg.id]
     # Name the session from its first turn so the sidebar reads meaningfully.
     needs_title = not history and (session.title or "").strip() in _DEFAULT_TITLES
     session_id = session.id

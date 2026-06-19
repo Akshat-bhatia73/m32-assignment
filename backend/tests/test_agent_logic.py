@@ -1,16 +1,37 @@
 """Unit tests for pure agent helpers (no DB / no network)."""
 
+from types import SimpleNamespace
+
 from app.agents.nodes.comms import (
     _conflict_for,
     _existing_intervals,
     _resolve_owner_emails,
 )
+from app.api.routes.chat import _message_context
 from app.services.transcript import _clean_captions
 
 MEMBERS = [
     {"id": "1", "name": "Priya Sharma", "email": "priya@acme.com", "role": "owner"},
     {"id": "2", "name": "David Lee", "email": "david@acme.com", "role": "member"},
 ]
+
+
+def test_message_context_restores_attachment_contents_for_follow_up_turns():
+    message = SimpleNamespace(
+        role="user",
+        content="Please summarize this meeting",
+        artifacts=[
+            {
+                "name": "standup.vtt",
+                "content": "Priya: The import completed successfully.",
+            }
+        ],
+    )
+
+    assert _message_context(message) == (
+        "Please summarize this meeting\n\n"
+        "--- standup.vtt ---\nPriya: The import completed successfully."
+    )
 
 
 def test_resolve_owner_emails_matches_name_email_and_firstname():

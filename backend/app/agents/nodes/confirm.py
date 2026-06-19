@@ -64,7 +64,7 @@ async def confirm_node(state: GraphState) -> dict:
     decision = await _decide(message)
     if decision == "no":
         session_tools.set_pending_action(session_id, None)
-        writer({"kind": "say", "text": "No problem — I'll hold off. Nothing was sent."})
+        writer({"kind": "say", "text": "No problem — I'll hold off. Nothing was changed."})
         return {}
     if decision == "unclear":
         writer({"kind": "say", "text": "Just to confirm — should I go ahead? (yes / no)"})
@@ -72,6 +72,30 @@ async def confirm_node(state: GraphState) -> dict:
 
     composio_user_id = state.get("user_email") or str(session_id)
     action_type = pending.get("type")
+    if action_type == "add_action_items":
+        notes = pending.get("notes", "")
+        meeting_id = board_tools.create_meeting(
+            session_id=session_id, user_id=state["user_id"], raw_text=notes
+        )
+        created = []
+        for item in pending.get("items", []):
+            event = board_tools.add_action_item(
+                session_id=session_id,
+                user_id=state["user_id"],
+                org_id=state.get("org_id"),
+                meeting_id=meeting_id,
+                task=item["task"],
+                owner=item.get("owner"),
+                due_date=item.get("due_date"),
+            )
+            writer({"kind": "board", **event})
+            created.append(event)
+        session_tools.set_pending_action(session_id, None)
+        count = len(created)
+        suffix = "s" if count != 1 else ""
+        writer({"kind": "say", "text": f"Added {count} action item{suffix} to the board."})
+        return {"meeting_id": meeting_id, "extracted": created}
+
     if action_type == "send_email":
         tool_call_id = uuid.uuid4().hex
         writer(

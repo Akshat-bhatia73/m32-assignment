@@ -1,8 +1,4 @@
-"""Extractor node — turns meeting notes into action items on the board.
-
-Structured LLM extraction, then deterministic DB writes via board_tools. Emits a tool part and
-one data-action-item part per created item through the LangGraph custom stream.
-"""
+"""Extractor node — summarizes meeting notes and proposes action items for approval."""
 
 import uuid
 from datetime import date
@@ -14,11 +10,13 @@ from pydantic import BaseModel, Field
 from app.agents.conversation import extract_text
 from app.agents.people import resolve_owner_name
 from app.agents.state import GraphState
-from app.agents.tools import board_tools
+from app.agents.tools import session_tools
 from app.llm.provider import get_classifier_llm
 
 EXTRACTOR_SYSTEM = (
-    "You extract concrete action items from meeting notes for a small-business owner.\n"
+    "You summarize meeting notes and extract concrete action items for a small-business owner.\n"
+    "Write a concise factual summary covering the main discussion, decisions, and unresolved "
+    "questions. Do not reduce the meeting to a task list.\n"
     "Today's date is {today}. For each action item return:\n"
     "- task: a short imperative description (e.g. 'Send Q3 budget to Priya').\n"
     "- owner: the person responsible if named, else null.\n"
@@ -38,13 +36,13 @@ class ExtractedItem(BaseModel):
 
 
 class Extraction(BaseModel):
+    summary: str = Field(description="Concise factual meeting summary in 1-3 short paragraphs.")
     items: list[ExtractedItem] = Field(default_factory=list)
 
 
 async def extractor_node(state: GraphState) -> dict:
     writer = get_stream_writer()
-    session_id: uuid.UUID = state["session_id"]
-    user_id: uuid.UUID = state["user_id"]
+    session_id = state["session_id"]
     notes = extract_text(state["messages"][-1].content)
 
     tool_call_id = uuid.uuid4().hex
@@ -65,29 +63,23 @@ async def extractor_node(state: GraphState) -> dict:
         ]
     )
 
-    meeting_id = board_tools.create_meeting(
-        session_id=session_id, user_id=user_id, raw_text=notes
-    )
-
     members = state.get("members") or []
     extracted: list[dict] = []
     for item in result.items:
         # Assign the owner to a real teammate when the workspace has members (canonical name),
         # so items land on the right person instead of a loose free-text string.
         owner = resolve_owner_name(item.owner, members)
-        event = board_tools.add_action_item(
-            session_id=session_id,
-            user_id=user_id,
-            org_id=state.get("org_id"),
-            meeting_id=meeting_id,
-            task=item.task,
-            owner=owner,
-            due_date=item.due_date,
-        )
-        writer({"kind": "board", **event})
-        extracted.append(event)
+        extracted.append({"task": item.task, "owner": owner, "due_date": item.due_date})
 
-    writer(
-        {"kind": "tool_output", "tool_call_id": tool_call_id, "output": {"created": len(extracted)}}
+    pending = (
+        {"type": "add_action_items", "items": extracted, "notes": notes} if extracted else None
     )
-    return {"meeting_id": meeting_id, "extracted": extracted}
+    session_tools.set_pending_action(session_id, pending)
+    writer(
+        {
+            "kind": "tool_output",
+            "tool_call_id": tool_call_id,
+            "output": {"proposed": len(extracted)},
+        }
+    )
+    return {"meeting_summary": result.summary, "extracted": extracted}

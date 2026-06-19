@@ -27,7 +27,8 @@ class GraphState(TypedDict, total=False):
     members: list[dict[str, Any]]
     meeting_id: uuid.UUID | None
     route: str  # set by the router: "extract" | "edit" | "comms" | "confirm" | "chat"
-    # Action items created this turn (board events), passed from extractor -> summarize.
+    # Action items proposed from meeting notes, passed from extractor -> summarize.
     extracted: list[dict[str, Any]]
+    meeting_summary: str | None
     # External action awaiting confirmation (loaded from the session at turn start).
     pending_action: dict[str, Any] | None

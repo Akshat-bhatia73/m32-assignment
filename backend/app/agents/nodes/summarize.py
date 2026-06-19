@@ -10,12 +10,11 @@ from app.agents.state import GraphState
 from app.llm.provider import get_llm
 
 SUMMARY_SYSTEM = (
-    "You are [Meeting]32. You just added action items to the user's board from their notes. "
-    "Confirm in 1-2 short, warm, plain sentences: state the EXACT number of items in the list "
-    "below and mention a couple of them by their actual wording. Reference ONLY items in the "
-    "list — never invent, rename, or add tasks, owners, or dates. If the list is empty, say you "
-    "couldn't find clear action items and invite them to share more detail. No bullet lists, "
-    "no jargon."
+    "You are [Meeting]32. Present the supplied meeting summary first under 'Summary'. Then, if "
+    "there are proposed action items, show them under 'Proposed action items' as a concise list "
+    "including only supplied owners and dates, and ask whether to add them to the board. Make it "
+    "explicit that nothing has been added yet. If there are no items, say no clear action items "
+    "were found. Never invent or rename details."
 )
 
 
@@ -33,7 +32,10 @@ def _format_items(extracted: list[dict]) -> str:
 async def summarize_node(state: GraphState) -> dict:
     extracted = state.get("extracted", [])
     llm = get_llm(temperature=0.3)
-    context = f"Items added to the board:\n{_format_items(extracted)}"
+    context = (
+        f"Meeting summary:\n{state.get('meeting_summary') or 'No summary available.'}\n\n"
+        f"Proposed action items:\n{_format_items(extracted)}"
+    )
     ai = await llm.ainvoke(
         [SystemMessage(content=SUMMARY_SYSTEM), HumanMessage(content=context)]
     )
