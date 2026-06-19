@@ -1,6 +1,6 @@
 import { useChat } from "@ai-sdk/react"
 import { DefaultChatTransport, type DynamicToolUIPart, type ToolUIPart, type UIMessage } from "ai"
-import { Copy, Paperclip, RotateCcw, Send, Sparkles } from "lucide-react"
+import { Copy, Lock, Paperclip, RotateCcw, Send, Sparkles } from "lucide-react"
 import { type ClipboardEvent, type KeyboardEvent, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 
@@ -79,12 +79,17 @@ export function ChatPanel({
   initialMessages,
   onTurnComplete,
   onSessionTitle,
+  readOnly = false,
+  ownerName = "the owner",
 }: {
   sessionId: string
   title: string
   initialMessages: UIMessage[]
   onTurnComplete: () => void
   onSessionTitle: (id: string, title: string) => void
+  /** When true, the viewer isn't the session owner: composer + all actions are disabled. */
+  readOnly?: boolean
+  ownerName?: string
 }) {
   const applyEvent = useBoardStore((s) => s.applyEvent)
   const clearRecent = useBoardStore((s) => s.clearRecent)
@@ -183,7 +188,7 @@ export function ChatPanel({
 
   function submit() {
     const text = input.trim()
-    if ((!text && pending.length === 0) || busy) return
+    if ((!text && pending.length === 0) || busy || readOnly) return
     clearRecent()
     sendMessage({ text, metadata: { artifacts: pending, createdAt: new Date().toISOString() } })
     setInput("")
@@ -191,7 +196,7 @@ export function ChatPanel({
   }
 
   function retry(message: UIMessage) {
-    if (busy) return
+    if (busy || readOnly) return
     clearRecent()
     regenerate({ messageId: message.id })
   }
@@ -203,6 +208,7 @@ export function ChatPanel({
 
   // Send a hidden confirm/cancel reply to the agent's pending action (used by every card).
   function decide(text: string) {
+    if (readOnly) return
     clearRecent()
     sendMessage({ text, metadata: { createdAt: new Date().toISOString() } })
   }
@@ -368,7 +374,7 @@ export function ChatPanel({
                             draft={emailDraft}
                             sent={sentDrafts.has(message.id)}
                             declined={declinedDrafts.has(message.id)}
-                            busy={busy}
+                            busy={busy || readOnly}
                             onSend={() => sendEmailDraft(message.id)}
                             onDecline={() => declineEmailDraft(message.id)}
                           />
@@ -378,7 +384,7 @@ export function ChatPanel({
                             proposal={proposal}
                             confirmed={confirmedProposals.has(message.id)}
                             declined={declinedProposals.has(message.id)}
-                            busy={busy}
+                            busy={busy || readOnly}
                             onConfirm={() => confirmProposal(message.id)}
                             onDecline={() => declineProposal(message.id)}
                           />
@@ -387,7 +393,7 @@ export function ChatPanel({
                           <CalendarActionCard
                             action={calendarAction}
                             decided={calendarDecisions[message.id] ?? null}
-                            busy={busy}
+                            busy={busy || readOnly}
                             onApprove={() => decideCalendarAction(message.id, "approved")}
                             onDecline={() => decideCalendarAction(message.id, "declined")}
                           />
@@ -418,7 +424,7 @@ export function ChatPanel({
                           >
                             <Copy className="size-3.5" />
                           </IconButton>
-                          {isLast ? (
+                          {isLast && !readOnly ? (
                             <IconButton
                               tooltip="Retry"
                               size="icon-xs"
@@ -448,6 +454,17 @@ export function ChatPanel({
       </Conversation>
 
       <div className="shrink-0 px-5 pb-5 pt-2">
+        {readOnly ? (
+          <div className="mx-auto flex w-full max-w-3xl items-center justify-center gap-2 rounded-2xl border border-border bg-muted/40 px-4 py-3 text-center text-sm text-muted-foreground">
+            <Lock className="size-4 shrink-0" />
+            <span>
+              Read-only — only{" "}
+              <span className="font-medium text-foreground">{ownerName}</span> can send messages in
+              this chat.
+            </span>
+          </div>
+        ) : (
+          <>
         <form
           onSubmit={(e) => {
             e.preventDefault()
@@ -513,6 +530,8 @@ export function ChatPanel({
         <p className="mx-auto mt-2 max-w-3xl px-1 text-center text-xs text-muted-foreground">
           Enter to send · Shift+Enter for a new line
         </p>
+          </>
+        )}
       </div>
 
       <ArtifactViewer artifact={viewing} onClose={() => setViewing(null)} />

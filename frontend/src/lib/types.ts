@@ -8,6 +8,9 @@ export type Session = {
   id: string
   title: string
   created_at: string
+  /** Who started the session. The chat is read-only for everyone except this user. */
+  owner_id: string
+  owner_name: string | null
 }
 
 export type ArtifactKind = "file" | "image" | "paste"

@@ -15,8 +15,13 @@ class GraphState(TypedDict, total=False):
     messages: Annotated[list[BaseMessage], add_messages]
     session_id: uuid.UUID
     user_id: uuid.UUID
+    # The current viewer (used to address them by name + send from their own connected account).
     user_name: str | None
     user_email: str | None
+    # The session's creator — the "meeting owner". Follow-up emails are drafted in their name so a
+    # shared session keeps one consistent sender no matter who opens or continues it.
+    organizer_name: str | None
+    organizer_email: str | None
     org_id: uuid.UUID | None
     # Org roster [{id, name, email, role}] — used to resolve action-item owners to teammate emails.
     members: list[dict[str, Any]]

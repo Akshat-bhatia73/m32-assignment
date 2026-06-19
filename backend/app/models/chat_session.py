@@ -29,3 +29,14 @@ class ChatSession(UUIDMixin, TimestampMixin, Base):
     messages: Mapped[list["Message"]] = relationship(  # noqa: F821
         back_populates="session", cascade="all, delete-orphan", order_by="Message.created_at"
     )
+    # The session's creator ("meeting owner"). Eager-loaded so listing sessions can expose who
+    # owns each one without an N+1 — drives the read-only-for-non-owners rule in the UI.
+    owner: Mapped["User"] = relationship("User", lazy="joined")  # noqa: F821
+
+    @property
+    def owner_id(self) -> uuid.UUID:
+        return self.user_id
+
+    @property
+    def owner_name(self) -> str | None:
+        return self.owner.name if self.owner else None

@@ -8,6 +8,7 @@ import { ChatPanel } from "@/components/chat/chat-panel"
 import { SessionSidebar } from "@/components/layout/session-sidebar"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { useCurrentUser } from "@/hooks/use-auth"
 import { api } from "@/lib/api"
 import type { ChatMessage, Session } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -44,6 +45,7 @@ export function WorkspacePage() {
 
   const sessionsQuery = useQuery({ queryKey: ["sessions"], queryFn: api.listSessions })
   const sessions = sessionsQuery.data
+  const { data: currentUser } = useCurrentUser()
 
   // The deep-link param is consumed into state above; drop it so the URL stays clean.
   useEffect(() => {
@@ -134,6 +136,11 @@ export function WorkspacePage() {
 
   const ready = currentId && messagesQuery.data && actionsQuery.data
 
+  // A shared session is read-only for everyone except the member who started it.
+  const currentSession = sessions?.find((s) => s.id === currentId)
+  const isOwner = !currentSession || !currentUser || currentSession.owner_id === currentUser.id
+  const ownerName = currentSession?.owner_name ?? "the owner"
+
   return (
     <div className="flex h-svh flex-col bg-background">
       {/* mobile pane switch */}
@@ -183,10 +190,12 @@ export function WorkspacePage() {
               <ChatPanel
                 key={currentId}
                 sessionId={currentId!}
-                title={sessions?.find((s) => s.id === currentId)?.title ?? "Untitled"}
+                title={currentSession?.title ?? "Untitled"}
                 initialMessages={toUIMessages(messagesQuery.data)}
                 onTurnComplete={refresh}
                 onSessionTitle={handleSessionTitle}
+                readOnly={!isOwner}
+                ownerName={ownerName}
               />
             </div>
             <div

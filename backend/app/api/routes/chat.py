@@ -9,7 +9,7 @@ from sqlalchemy import select
 from app.agents.conversation import generate_title
 from app.agents.graph import stream_agent
 from app.api.deps import CurrentMembership, CurrentUser, DbSession
-from app.models import ChatSession, Message
+from app.models import ChatSession, Message, User
 from app.schemas.chat import ChatRequest
 from app.services import ai_stream, orgs
 
@@ -29,8 +29,22 @@ def chat_stream(
     session = db.get(ChatSession, payload.session_id)
     if session is None or session.org_id != membership.org_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
+    # Workspaces share sessions read-only: only the person who started a chat can post to it, so
+    # there's a single writer per thread — no two members streaming into one conversation at once.
+    if session.user_id != current_user.id:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "This chat is read-only — only the person who started it can send messages.",
+        )
     org_id = membership.org_id
     members = orgs.org_roster(db, org_id)
+
+    # Follow-up emails are drafted in the name of whoever started this session (the meeting owner),
+    # not the current viewer — so a shared session keeps one consistent sender no matter who opens
+    # or continues it. Fall back to the current user for legacy sessions with no recorded creator.
+    creator = db.get(User, session.user_id)
+    organizer_name = creator.name if creator else current_user.name
+    organizer_email = creator.email if creator else current_user.email
 
     # Split what the user sees (typed text + attachment chips) from what the agent reads
     # (typed text with the full attachment contents inlined for extraction).
@@ -103,6 +117,8 @@ def chat_stream(
                 current_user.email,
                 org_id=org_id,
                 members=members,
+                organizer_name=organizer_name,
+                organizer_email=organizer_email,
                 model=payload.model,
                 reasoning=payload.reasoning,
             ):

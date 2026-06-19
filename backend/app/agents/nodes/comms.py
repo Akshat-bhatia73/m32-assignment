@@ -493,7 +493,9 @@ async def _draft_email(state: GraphState, message: str) -> dict:
 
     writer = get_stream_writer()
     session_id = state["session_id"]
-    organizer = state.get("user_email")
+    # The meeting owner (session creator) is the sender — not whoever is currently viewing — so a
+    # shared session always drafts with one consistent name + reply-to.
+    organizer = state.get("organizer_email") or state.get("user_email")
     open_items = board_tools.list_items(session_id, open_only=True)
     members = state.get("members") or []
 
@@ -501,7 +503,7 @@ async def _draft_email(state: GraphState, message: str) -> dict:
     writer({"kind": "tool_input", "tool_call_id": tool_call_id, "tool_name": "draft_email",
             "input": {"request": message[:200]}})
 
-    sender = state.get("user_name") or ((organizer or "").split("@")[0] or "The team")
+    sender = state.get("organizer_name") or ((organizer or "").split("@")[0] or "The team")
     item_lines = "\n".join(
         f"- {i['task']}"
         + (f" (owner: {i['owner']})" if i.get("owner") else "")

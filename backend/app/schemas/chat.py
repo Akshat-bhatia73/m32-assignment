@@ -20,6 +20,10 @@ class SessionOut(BaseModel):
     id: uuid.UUID
     title: str
     created_at: datetime
+    # Who started the session. The UI compares owner_id to the signed-in user to decide whether
+    # the chat is editable or read-only for them.
+    owner_id: uuid.UUID
+    owner_name: str | None = None
 
 
 class Artifact(BaseModel):

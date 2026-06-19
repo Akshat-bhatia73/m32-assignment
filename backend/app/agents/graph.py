@@ -107,6 +107,8 @@ async def stream_agent(
     user_email: str | None = None,
     org_id: uuid.UUID | None = None,
     members: list[dict] | None = None,
+    organizer_name: str | None = None,
+    organizer_email: str | None = None,
     model: str | None = None,
     reasoning: str | None = None,
 ) -> AsyncGenerator[tuple[str, dict | None], None]:
@@ -131,6 +133,9 @@ async def stream_agent(
         "user_id": user_id,
         "user_name": user_name,
         "user_email": user_email,
+        # Default the organizer to the current viewer (e.g. a session with no recorded creator).
+        "organizer_name": organizer_name or user_name,
+        "organizer_email": organizer_email or user_email,
         "org_id": org_id,
         "members": members or [],
         "pending_action": session_tools.get_pending_action(session_id),
