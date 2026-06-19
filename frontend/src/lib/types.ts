@@ -178,6 +178,8 @@ export type ModelInfo = {
   label: string
   provider: "openai" | "google"
   blurb: string
+  /** Relative running cost, rendered as filled/faded "$" up to ModelsResponse.max_cost_tier. */
+  cost_tier: number
   supports_reasoning: boolean
   reasoning_options: ReasoningEffort[]
   default_reasoning: ReasoningEffort | null
@@ -186,5 +188,6 @@ export type ModelInfo = {
 /** Response of GET /models — the available catalog plus the server's default pick. */
 export type ModelsResponse = {
   default: { model: string; reasoning: ReasoningEffort | null }
+  max_cost_tier: number
   models: ModelInfo[]
 }

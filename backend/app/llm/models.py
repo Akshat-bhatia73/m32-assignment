@@ -15,6 +15,8 @@ class ModelSpec:
     label: str  # display name in the UI
     provider: str  # "openai" | "google" — also selects which API key is required
     blurb: str  # one-line description shown in the model picker
+    # Relative running cost, shown as 1–N "$" in the picker (1 = cheapest).
+    cost_tier: int = 1
     # Reasoning models (e.g. GPT-5.5) reject a custom temperature and take a reasoning effort.
     supports_temperature: bool = True
     supports_reasoning: bool = False
@@ -29,6 +31,7 @@ CATALOG: tuple[ModelSpec, ...] = (
         label="GPT-5.5",
         provider="openai",
         blurb="OpenAI's flagship. Deliberate, reasoning-driven answers.",
+        cost_tier=2,
         supports_temperature=False,
         supports_reasoning=True,
         reasoning_options=("low", "medium", "high"),
@@ -55,6 +58,9 @@ CATALOG: tuple[ModelSpec, ...] = (
 )
 
 BY_ID: dict[str, ModelSpec] = {m.id: m for m in CATALOG}
+
+# Highest cost tier in the catalog — the picker renders cost as filled/faded "$" up to this.
+MAX_COST_TIER = max(m.cost_tier for m in CATALOG)
 
 # Internal classification / parsing always uses the cheapest capable model, regardless of the
 # user's conversation pick — OpenAI's mini first, Google's flash-lite when no OpenAI key is set.

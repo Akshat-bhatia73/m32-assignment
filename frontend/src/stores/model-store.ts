@@ -10,6 +10,8 @@ type ModelState = {
   /** Server default, applied until — and unless — the user picks their own. Not persisted. */
   defaultModel: string | null
   defaultReasoning: ReasoningEffort | null
+  /** Highest cost tier across the catalog — used to render the cost "$" scale. */
+  maxCostTier: number
   loaded: boolean
   /** The user's explicit pick (persisted across reloads). null ⇒ follow the server default. */
   pickedModel: string | null
@@ -25,6 +27,7 @@ export const useModelStore = create<ModelState>()(
       models: [],
       defaultModel: null,
       defaultReasoning: null,
+      maxCostTier: 1,
       loaded: false,
       pickedModel: null,
       pickedReasoning: null,
@@ -39,6 +42,7 @@ export const useModelStore = create<ModelState>()(
             models: res.models,
             defaultModel: res.default.model,
             defaultReasoning: res.default.reasoning,
+            maxCostTier: res.max_cost_tier,
             loaded: true,
             pickedModel: picked && available.has(picked) ? picked : null,
           })

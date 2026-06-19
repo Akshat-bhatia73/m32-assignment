@@ -467,14 +467,29 @@ export function ChatPanel({
               ))}
             </div>
           ) : null}
-          <div className="flex items-end gap-2">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept={UPLOAD_ACCEPT}
-              className="hidden"
-              onChange={onFileSelected}
-            />
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={UPLOAD_ACCEPT}
+            className="hidden"
+            onChange={onFileSelected}
+          />
+          <Textarea
+            ref={textareaRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={onKeyDown}
+            onPaste={onPaste}
+            rows={1}
+            placeholder={
+              uploading
+                ? "Reading your file…"
+                : "Paste meeting notes, attach a transcript, or ask me to draft a follow-up…"
+            }
+            className="max-h-40 min-h-9 w-full resize-none border-0 bg-transparent px-1.5 py-1.5 shadow-none focus-visible:ring-0 dark:bg-transparent"
+          />
+          {/* Composer toolbar — attach + model picker on the left, send on the right. */}
+          <div className="flex items-center gap-1.5 pt-1">
             <IconButton
               tooltip="Attach a transcript or screenshot"
               variant="ghost"
@@ -484,27 +499,15 @@ export function ChatPanel({
             >
               {uploading ? <Spinner className="size-4" /> : <Paperclip className="size-4" />}
             </IconButton>
-            <Textarea
-              ref={textareaRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={onKeyDown}
-              onPaste={onPaste}
-              rows={1}
-              placeholder={
-                uploading
-                  ? "Reading your file…"
-                  : "Paste meeting notes, attach a transcript, or ask me to draft a follow-up…"
-              }
-              className="max-h-40 min-h-9 flex-1 resize-none self-center border-0 bg-transparent px-1 py-1.5 shadow-none focus-visible:ring-0 dark:bg-transparent"
-            />
-            <IconButton tooltip="Send" type="submit" className="size-9 shrink-0" disabled={!canSend}>
+            <ModelSelector disabled={busy} />
+            <IconButton
+              tooltip="Send"
+              type="submit"
+              className="ms-auto size-9 shrink-0"
+              disabled={!canSend}
+            >
               {busy ? <Spinner className="size-4" /> : <Send className="size-4" />}
             </IconButton>
-          </div>
-          {/* Composer toolbar — pick the model that writes the reply. */}
-          <div className="flex items-center gap-1 px-1 pt-1.5">
-            <ModelSelector disabled={busy} />
           </div>
         </form>
         <p className="mx-auto mt-2 max-w-3xl px-1 text-center text-xs text-muted-foreground">
