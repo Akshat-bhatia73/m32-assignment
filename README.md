@@ -7,7 +7,11 @@ work gets organized, assigned, and scheduled.
 
 > M32 Fullstack + AI take-home. The name is a play on **M32** → **[Meeting]32**.
 
-<!-- 📹 Demo video: <link to be added> -->
+**🔗 Live app:** _<add hosted URL>_ · **📹 Demo video:** _<add link>_
+
+> ⏱️ **First load may be slow.** The hosted backend runs on Render's free tier, which spins down
+> after inactivity. The **first request after a cold start can take ~50–60s** while the service
+> wakes up; everything is snappy once it's warm.
 
 ## What it does
 
@@ -21,6 +25,9 @@ work gets organized, assigned, and scheduled.
   can **reschedule, rename, or remove** events it created.
 - **Approve / Decline buttons** — anything with an external side effect (send email, create /
   move / cancel events) shows inline action buttons; no need to type "yes".
+- **Pick your model** — choose the model that writes your replies (Gemini 3.1 Flash Lite, Gemma 4
+  31B, GPT-5.4 Mini, GPT-5.5) right from the composer; GPT-5.5 exposes low / medium / high
+  reasoning. Defaults to GPT-5.5 (low) when an OpenAI key is set, otherwise Gemini 3.1 Flash Lite.
 - **Workspaces** — shared org board, member invites, multi-session history with auto-titles.
 
 ## Stack
@@ -30,7 +37,7 @@ work gets organized, assigned, and scheduled.
 | **Frontend** | React 19 + Vite + TypeScript, Tailwind v4, shadcn (Base UI), Vercel AI Elements, **bun** |
 | **Backend** | Python 3.12, FastAPI, **LangGraph** multi-agent, SQLAlchemy 2 + Alembic, managed with **uv** |
 | **Database** | Neon (Postgres) |
-| **LLM** | Gemini (free tier) behind a provider wrapper — one-line swap to OpenAI |
+| **LLM** | **User-selectable models** behind one provider wrapper — Google (Gemini 3.1 Flash Lite, Gemma 4 31B) + OpenAI (GPT-5.4 Mini, GPT-5.5 with reasoning) |
 | **Integrations** | Composio (Gmail + Google Calendar), Google OAuth |
 | **Hosting** | Vercel (frontend) · Render (backend) · Neon (DB) |
 
@@ -49,6 +56,14 @@ router ─────┼─ comms ───▶ comms (draft email · plan / res
 Extraction and edits are **deterministic-after-LLM** (the LLM returns structured output; we apply
 DB writes ourselves), which is far more reliable than a free-form tool-calling loop. External calls
 (Gmail / Calendar) are gated behind an explicit confirmation step.
+
+**Cost-aware model routing.** Each turn fires several internal LLM calls plus one visible
+generation, so the two are split into tiers. High-frequency internal work — routing, intent +
+reschedule/cancel parsing, yes/no confirmation, action-item extraction, session titles, image OCR —
+is pinned to a cheap fixed model (**GPT-5.4 Mini**, with a Gemini fallback when no OpenAI key is
+set). Only the user-facing output — chat reply, summary, email draft — uses the model picked in the
+UI. The catalog is the single source of truth in `backend/app/llm/models.py`; the per-request
+selection is resolved in `app/llm/provider.py` and exposed to the frontend via `GET /models`.
 
 ## Run locally
 
@@ -82,7 +97,9 @@ bun install
 bun run dev                               # http://localhost:5173
 ```
 
-> Without an LLM key the chat runs in **echo mode** so the streaming pipe is testable.
+> With **no** LLM key (neither Gemini nor OpenAI) the chat runs in **echo mode** so the streaming
+> pipe is testable. Set either key to enable real models; set the OpenAI key to unlock the GPT
+> models and make GPT-5.5 (low) the default.
 > Without a Composio key, Gmail/Calendar calls are **simulated** so the full flow still demos.
 
 ## Environment variables
@@ -93,10 +110,8 @@ Copy `.env.example` → `.env`. Everything has a sensible default; fill in what 
 | --- | --- | --- |
 | `DATABASE_URL` | prod | Postgres connection string (Neon: `postgresql+psycopg://…?sslmode=require`). Omit to use the Docker `db` container. |
 | `JWT_SECRET` | ✅ | Signing key for auth cookies — change in production. |
-| `LLM_PROVIDER` | — | `gemini` (default) or `openai`. |
-| `GEMINI_API_KEY` | for AI | Gemini key. Blank → echo mode. |
-| `GEMINI_MODEL` | — | Defaults to `gemini-3.1-flash-lite`. |
-| `OPENAI_API_KEY` / `OPENAI_MODEL` | — | Used when `LLM_PROVIDER=openai`. |
+| `GEMINI_API_KEY` | for AI | Enables the Google models (Gemini 3.1 Flash Lite, Gemma 4 31B). |
+| `OPENAI_API_KEY` | for AI | Enables the OpenAI models (GPT-5.4 Mini, GPT-5.5) and makes **GPT-5.5 (low)** the default. At least one of the two keys is needed; with neither, chat runs in echo mode. |
 | `COMPOSIO_API_KEY` | for Gmail/Calendar | Composio key. Blank → simulated integrations. |
 | `COMPOSIO_TIMEZONE` | — | IANA tz for created events (e.g. `Asia/Kolkata`). Defaults to `UTC`. |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | for Google OAuth | Google sign-in / connection. |
@@ -107,7 +122,9 @@ Copy `.env.example` → `.env`. Everything has a sensible default; fill in what 
 
 - **Frontend → Vercel:** SPA + security headers configured in `frontend/vercel.json`. Set
   `VITE_API_BASE_URL` to the Render backend URL.
-- **Backend → Render:** `render.yaml` blueprint; migrations run on container start.
+- **Backend → Render:** `render.yaml` blueprint; migrations run on container start. On the free
+  tier the service sleeps after inactivity, so the first request after a cold start can take
+  **~50–60s** to respond — subsequent requests are fast.
 - **DB → Neon:** point `DATABASE_URL` at the pooled connection string.
 
 ## Tests

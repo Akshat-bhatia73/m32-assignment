@@ -1,5 +1,4 @@
 import {
-  CheckSquare,
   LayoutGrid,
   LogOut,
   MoreHorizontal,
@@ -12,6 +11,7 @@ import { NavLink, useNavigate } from "react-router-dom"
 
 import { useQuery } from "@tanstack/react-query"
 
+import { Logo } from "@/components/icons/logo"
 import { SettingsDialog } from "@/components/layout/settings-dialog"
 import { ThemeToggle } from "@/components/layout/theme-toggle"
 import { api } from "@/lib/api"
@@ -67,7 +67,7 @@ export function SessionSidebar({
       {/* Brand — replaces the old global top bar. */}
       <div className="flex h-[3.75rem] shrink-0 items-center gap-2 border-b border-sidebar-border px-4">
         <div className="flex size-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
-          <CheckSquare className="size-4" />
+          <Logo className="size-4" />
         </div>
         <div className="leading-tight">
           <p className="text-sm font-semibold text-foreground">[Meeting]32</p>
