@@ -12,6 +12,7 @@ import {
 import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message"
 import { ArtifactChip } from "@/components/chat/artifact-chip"
 import { ArtifactViewer } from "@/components/chat/artifact-viewer"
+import { CalendarActionCard } from "@/components/chat/calendar-action-card"
 import { CalendarProposalCard } from "@/components/chat/calendar-proposal-card"
 import { EmailDraftCard } from "@/components/chat/email-draft-card"
 import { ThinkingTrail } from "@/components/chat/thinking-trail"
@@ -23,6 +24,7 @@ import { api, API_BASE } from "@/lib/api"
 import type {
   Artifact,
   ActionItemEvent,
+  CalendarActionEvent,
   CalendarProposalEvent,
   EmailDraftEvent,
   SessionTitleEvent,
@@ -92,8 +94,16 @@ export function ChatPanel({
   const [liveTimes, setLiveTimes] = useState<Record<string, string>>({})
   // Email-draft cards whose "Send" was clicked — disables the button after one send.
   const [sentDrafts, setSentDrafts] = useState<Set<string>>(new Set())
+  // Email-draft cards that were dismissed.
+  const [declinedDrafts, setDeclinedDrafts] = useState<Set<string>>(new Set())
   // Calendar-proposal cards whose "Add" was clicked — disables the button after one confirm.
   const [confirmedProposals, setConfirmedProposals] = useState<Set<string>>(new Set())
+  // Calendar-proposal cards that were dismissed.
+  const [declinedProposals, setDeclinedProposals] = useState<Set<string>>(new Set())
+  // Calendar reschedule/cancel cards → "approved" | "declined" once the user acts.
+  const [calendarDecisions, setCalendarDecisions] = useState<
+    Record<string, "approved" | "declined">
+  >({})
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -185,20 +195,43 @@ export function ChatPanel({
     toast.success("Copied response")
   }
 
+  // Send a hidden confirm/cancel reply to the agent's pending action (used by every card).
+  function decide(text: string) {
+    clearRecent()
+    sendMessage({ text, metadata: { createdAt: new Date().toISOString() } })
+  }
+
   // Confirm + send an email draft card — routes to the confirm node, which sends via Gmail.
   function sendEmailDraft(messageId: string) {
     if (busy) return
     setSentDrafts((s) => new Set(s).add(messageId))
-    clearRecent()
-    sendMessage({ text: "Send it", metadata: { createdAt: new Date().toISOString() } })
+    decide("Send it")
+  }
+
+  function declineEmailDraft(messageId: string) {
+    if (busy) return
+    setDeclinedDrafts((s) => new Set(s).add(messageId))
+    decide("Cancel")
   }
 
   // Confirm a calendar proposal card — routes to the confirm node, which creates the events.
   function confirmProposal(messageId: string) {
     if (busy) return
     setConfirmedProposals((s) => new Set(s).add(messageId))
-    clearRecent()
-    sendMessage({ text: "Yes", metadata: { createdAt: new Date().toISOString() } })
+    decide("Yes")
+  }
+
+  function declineProposal(messageId: string) {
+    if (busy) return
+    setDeclinedProposals((s) => new Set(s).add(messageId))
+    decide("Cancel")
+  }
+
+  // Approve / decline a single reschedule or cancellation card.
+  function decideCalendarAction(messageId: string, decision: "approved" | "declined") {
+    if (busy) return
+    setCalendarDecisions((d) => ({ ...d, [messageId]: decision }))
+    decide(decision === "approved" ? "Yes" : "Cancel")
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -283,12 +316,19 @@ export function ChatPanel({
               const proposal = proposalPart
                 ? (proposalPart as { data: CalendarProposalEvent }).data
                 : undefined
+              const calendarActionPart = message.parts.find(
+                (p) => p.type === "data-calendar-action"
+              )
+              const calendarAction = calendarActionPart
+                ? (calendarActionPart as { data: CalendarActionEvent }).data
+                : undefined
+              // Cards carry their own copy; suppress the plain-text twin when one is present.
+              const hasCard = !!emailDraft || !!proposal || !!calendarAction
               // Only show the bubble when it has something inside it — a text-only
               // attachment (paste/upload with no typed message) shows just the chip.
               const hasBubble =
                 hasText ||
-                !!emailDraft ||
-                !!proposal ||
+                hasCard ||
                 message.parts.some(isToolPart) ||
                 (isAssistant && statuses.length > 0)
               return (
@@ -305,7 +345,7 @@ export function ChatPanel({
                         {message.parts.map((part, i) => {
                           if (part.type === "text") {
                             // The card carries the draft/proposal; hide its plain-text twin.
-                            if (!part.text || emailDraft || proposal) return null
+                            if (!part.text || hasCard) return null
                             return (
                               <MessageResponse key={i} className={MARKDOWN_CLASS}>
                                 {part.text}
@@ -321,16 +361,29 @@ export function ChatPanel({
                           <EmailDraftCard
                             draft={emailDraft}
                             sent={sentDrafts.has(message.id)}
+                            declined={declinedDrafts.has(message.id)}
                             busy={busy}
                             onSend={() => sendEmailDraft(message.id)}
+                            onDecline={() => declineEmailDraft(message.id)}
                           />
                         ) : null}
                         {proposal ? (
                           <CalendarProposalCard
                             proposal={proposal}
                             confirmed={confirmedProposals.has(message.id)}
+                            declined={declinedProposals.has(message.id)}
                             busy={busy}
                             onConfirm={() => confirmProposal(message.id)}
+                            onDecline={() => declineProposal(message.id)}
+                          />
+                        ) : null}
+                        {calendarAction ? (
+                          <CalendarActionCard
+                            action={calendarAction}
+                            decided={calendarDecisions[message.id] ?? null}
+                            busy={busy}
+                            onApprove={() => decideCalendarAction(message.id, "approved")}
+                            onDecline={() => decideCalendarAction(message.id, "declined")}
                           />
                         ) : null}
                       </MessageContent>

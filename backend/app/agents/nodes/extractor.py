@@ -12,6 +12,7 @@ from langgraph.config import get_stream_writer
 from pydantic import BaseModel, Field
 
 from app.agents.conversation import extract_text
+from app.agents.people import resolve_owner_name
 from app.agents.state import GraphState
 from app.agents.tools import board_tools
 from app.llm.provider import get_llm
@@ -66,15 +67,19 @@ async def extractor_node(state: GraphState) -> dict:
         session_id=session_id, user_id=user_id, raw_text=notes
     )
 
+    members = state.get("members") or []
     extracted: list[dict] = []
     for item in result.items:
+        # Assign the owner to a real teammate when the workspace has members (canonical name),
+        # so items land on the right person instead of a loose free-text string.
+        owner = resolve_owner_name(item.owner, members)
         event = board_tools.add_action_item(
             session_id=session_id,
             user_id=user_id,
             org_id=state.get("org_id"),
             meeting_id=meeting_id,
             task=item.task,
-            owner=item.owner,
+            owner=owner,
             due_date=item.due_date,
         )
         writer({"kind": "board", **event})

@@ -1,4 +1,4 @@
-# Backend — Meeting → Done Ops Copilot
+# Backend — [Meeting]32 Ops Copilot
 
 FastAPI + LangGraph + SQLAlchemy/Alembic on Neon (Postgres). Managed with **uv** (Python 3.12).
 

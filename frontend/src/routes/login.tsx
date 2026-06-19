@@ -35,7 +35,7 @@ export function LoginPage() {
   return (
     <AuthShell
       title="Welcome back"
-      subtitle="Sign in to your Ops Copilot"
+      subtitle="Sign in to [Meeting]32"
       footer={
         <>
           New here?{" "}

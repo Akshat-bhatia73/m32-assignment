@@ -74,7 +74,7 @@ def _send_invite_email(
     signup_url = settings.cors_origins[0] if settings.cors_origins else ""
     who = inviter_name or inviter_email
     body = (
-        f"Hi,\n\n{who} invited you to join the “{org_name}” workspace on Meeting → Done, "
+        f"Hi,\n\n{who} invited you to join the “{org_name}” workspace on [Meeting]32, "
         "an ops copilot that turns meeting notes into tracked action items and follow-ups.\n\n"
         f"To join, sign up with this email address ({invitee}) here:\n{signup_url}\n\n"
         "You'll land straight in the shared workspace.\n\nSee you there!"

@@ -13,6 +13,7 @@ from langgraph.config import get_stream_writer
 from pydantic import BaseModel, Field
 
 from app.agents.conversation import extract_text
+from app.agents.people import resolve_owner_emails as _resolve_owner_emails
 from app.agents.state import GraphState
 from app.agents.tools import board_tools, composio_tools, session_tools
 from app.config import settings
@@ -76,14 +77,28 @@ def _conflict_for(event_date: str, intervals: list[tuple[datetime, datetime, str
 
 EMAIL_SYSTEM = (
     "You draft a short, warm, professional follow-up email for a small-business owner, summarizing "
-    "the meeting's action items. Plain language, no jargon. Provide a concise subject line and a "
-    "body that lists who owns what and any due dates. Keep it under ~150 words."
+    "the meeting's action items. Plain language, no jargon.\n\n"
+    "Return a concise subject line and a plain-text body. Format the body EXACTLY like this, using "
+    "real newline characters (\\n) — never run the list together on one line:\n"
+    "Hi team,\n\n"
+    "<one short intro sentence>\n\n"
+    "- <action item> — <Owner>, due <date>\n"
+    "- <next action item> — <Owner>, due <date>\n\n"
+    "<one short closing sentence>\n\n"
+    "Thanks,\n"
+    "<sender name>\n\n"
+    "Rules: put each action item on its OWN line starting with '- '. Omit 'due <date>' when there "
+    "is no due date, and omit the owner when none is given. Sign off with 'Thanks,' on its own "
+    "line followed by the sender's name on the next line. Keep the whole body under ~150 words."
 )
 
 
 class EmailDraft(BaseModel):
     subject: str = Field(description="Concise subject line.")
-    body: str = Field(description="Email body, plain text.")
+    body: str = Field(
+        description="Email body as plain text with real newlines; each action item on its own "
+        "line, signed off with the sender's name."
+    )
 
 
 def _wants_schedule(message: str) -> bool:
@@ -91,40 +106,13 @@ def _wants_schedule(message: str) -> bool:
     return any(h in low for h in _SCHEDULE_HINTS)
 
 
-def _resolve_owner_emails(open_items: list[dict], members: list[dict]) -> set[str]:
-    """Map each open item's free-text owner to a teammate email from the org roster.
-
-    Matches exactly on email or full name, then falls back to first name. Unmatched owners are
-    skipped (the follow-up still goes to the organizer).
-    """
-    by_email: dict[str, str] = {}
-    by_name: dict[str, str] = {}
-    by_first: dict[str, str] = {}
-    for m in members:
-        email = (m.get("email") or "").strip()
-        if not email:
-            continue
-        by_email[email.lower()] = email
-        name = (m.get("name") or "").strip()
-        if name:
-            by_name[name.lower()] = email
-            by_first.setdefault(name.split()[0].lower(), email)
-        # Also let the email's local-part match a first-name-style owner string.
-        by_first.setdefault(email.split("@")[0].lower(), email)
-
-    resolved: set[str] = set()
-    for item in open_items:
-        owner = (item.get("owner") or "").strip().lower()
-        if not owner:
-            continue
-        email = by_email.get(owner) or by_name.get(owner) or by_first.get(owner.split()[0])
-        if email:
-            resolved.add(email)
-    return resolved
-
-
 _RESCHEDULE_HINTS = ("reschedul", "move the", "move my", "push back", "push the", "shift the",
-                     "change the time", "move it", "bump the")
+                     "change the time", "move it", "bump the", "rename the", "retitle",
+                     "change the title", "change the name")
+
+_CANCEL_HINTS = ("cancel", "delete", "remove", "call off", "drop the", "take off",
+                 "get rid of", "clear the")
+_EVENT_WORDS = ("event", "meeting", "calendar", "invite", "appointment", "booking")
 
 
 def _wants_reschedule(message: str) -> bool:
@@ -132,27 +120,48 @@ def _wants_reschedule(message: str) -> bool:
     return any(h in low for h in _RESCHEDULE_HINTS)
 
 
+def _wants_cancel_event(message: str) -> bool:
+    """True for 'cancel/remove the calendar event' style requests (not 'remove a task')."""
+    low = message.lower()
+    return any(h in low for h in _CANCEL_HINTS) and any(w in low for w in _EVENT_WORDS)
+
+
 class RescheduleParse(BaseModel):
     item_id: str | None = Field(
-        default=None, description="The id of the scheduled item to move, or null if unclear."
+        default=None, description="The id of the scheduled item to edit, or null if unclear."
     )
     new_datetime: str | None = Field(
         default=None,
-        description="New start as ISO 8601 local datetime 'YYYY-MM-DDTHH:MM:SS', or null.",
+        description="New start as ISO 8601 local datetime 'YYYY-MM-DDTHH:MM:SS', or null if the "
+        "time isn't changing.",
+    )
+    new_title: str | None = Field(
+        default=None,
+        description="New event title if the user is renaming it, else null.",
     )
 
 
+class CancelParse(BaseModel):
+    item_id: str | None = Field(
+        default=None, description="The id of the scheduled item whose event to remove, or null."
+    )
+
+
+def _scheduled_items(session_id) -> list[dict]:
+    items = board_tools.list_items(session_id)
+    return [i for i in items if i.get("status") == "scheduled" and i.get("external_ref")]
+
+
 async def _reschedule(state: GraphState, message: str) -> dict:
-    """Parse a 'move X to <time>' request against the scheduled items and queue an update."""
+    """Parse a 'move/rename X' request against the scheduled items and queue an event edit."""
     from app.llm.provider import get_llm
 
     writer = get_stream_writer()
     session_id = state["session_id"]
-    items = board_tools.list_items(session_id)
-    scheduled = [i for i in items if i.get("status") == "scheduled" and i.get("external_ref")]
+    scheduled = _scheduled_items(session_id)
     if not scheduled:
-        writer({"kind": "say", "text": "I don't see any scheduled events to move yet. Schedule "
-                "some items first, then I can reschedule them."})
+        writer({"kind": "say", "text": "I don't see any scheduled events to change yet. Schedule "
+                "some items first, then I can edit them."})
         return {}
 
     roster = "\n".join(
@@ -163,29 +172,89 @@ async def _reschedule(state: GraphState, message: str) -> dict:
     llm = get_llm(temperature=0.0).with_structured_output(RescheduleParse)
     parsed: RescheduleParse = await llm.ainvoke([
         SystemMessage(content=(
-            "Match the user's reschedule request to one scheduled item and resolve the new start "
-            f"time. Today is {today}. Use the configured timezone. Vague times: morning=09:00, "
-            "afternoon=14:00, evening=18:00. Return the item's id and an ISO local datetime "
-            "'YYYY-MM-DDTHH:MM:SS'. If you can't tell which item, return null item_id."
+            "Match the user's request to one scheduled event and resolve any changes to its start "
+            f"time and/or title. Today is {today}. Use the configured timezone. Vague times: "
+            "morning=09:00, afternoon=14:00, evening=18:00. Return the item's id, an ISO local "
+            "datetime 'YYYY-MM-DDTHH:MM:SS' if the time changes (else null), and a new_title if "
+            "they're renaming it (else null). If you can't tell which event, return null item_id."
         )),
-        HumanMessage(content=f"Scheduled items:\n{roster}\n\nRequest:\n{message}"),
+        HumanMessage(content=f"Scheduled events:\n{roster}\n\nRequest:\n{message}"),
     ])
     target = next((i for i in scheduled if i["id"] == parsed.item_id), None)
-    if not target or not parsed.new_datetime:
-        writer({"kind": "say", "text": "I'm not sure which event to move or to when. Try e.g. "
-                "“move the pricing-page review to tomorrow afternoon”."})
+    if not target or (not parsed.new_datetime and not parsed.new_title):
+        writer({"kind": "say", "text": "I'm not sure which event to change or what to change. Try "
+                "e.g. “move the pricing-page review to tomorrow afternoon”."})
         return {}
 
+    # Keep the existing start when only the title changes (the event must keep a valid time).
+    start_dt = parsed.new_datetime or (
+        f"{target['due_date']}T{_EVENT_HOUR:02d}:00:00" if target.get("due_date") else None
+    )
+    if not start_dt:
+        writer({"kind": "say", "text": "I couldn't work out the event's time. Tell me a date/time "
+                "and I'll update it."})
+        return {}
+    new_summary = parsed.new_title or target["task"]
     session_tools.set_pending_action(session_id, {
         "type": "reschedule_event",
         "action_item_id": target["id"],
         "event_id": target["external_ref"],
-        "summary": target["task"],
-        "start_datetime": parsed.new_datetime,
+        "summary": new_summary,
+        "start_datetime": start_dt,
     })
-    when = parsed.new_datetime.replace("T", " at ")
-    writer({"kind": "say", "text": f"I'll move “{target['task']}” to {when}. Reply “yes” to "
-            "update your calendar, or tell me a different time."})
+    when = start_dt.replace("T", " at ")
+    change = []
+    if parsed.new_title:
+        change.append(f"rename it to “{parsed.new_title}”")
+    if parsed.new_datetime:
+        change.append(f"move it to {when}")
+    detail = " and ".join(change) if change else f"update it ({when})"
+    # Structured part → the client renders an Approve / Decline card.
+    writer({"kind": "calendar_action", "action": "reschedule_event", "title": new_summary,
+            "when": when, "detail": f"I'll {detail}."})
+    writer({"kind": "say", "text": f"I'll {detail}. Approve to update your calendar, or tell me a "
+            "different change."})
+    return {}
+
+
+async def _cancel_event(state: GraphState, message: str) -> dict:
+    """Parse a 'cancel/remove the X event' request and queue a calendar deletion."""
+    from app.llm.provider import get_llm
+
+    writer = get_stream_writer()
+    session_id = state["session_id"]
+    scheduled = _scheduled_items(session_id)
+    if not scheduled:
+        writer({"kind": "say", "text": "I don't see any scheduled events to remove yet."})
+        return {}
+
+    roster = "\n".join(
+        f"- id={i['id']} | {i['task']} | due {i.get('due_date') or 'n/a'}" for i in scheduled
+    )
+    llm = get_llm(temperature=0.0).with_structured_output(CancelParse)
+    parsed: CancelParse = await llm.ainvoke([
+        SystemMessage(content=(
+            "Match the user's request to the one scheduled event they want removed from their "
+            "calendar. Return that item's id, or null if you can't tell which one."
+        )),
+        HumanMessage(content=f"Scheduled events:\n{roster}\n\nRequest:\n{message}"),
+    ])
+    target = next((i for i in scheduled if i["id"] == parsed.item_id), None)
+    if not target:
+        writer({"kind": "say", "text": "I'm not sure which event you mean. Tell me which one to "
+                "remove, e.g. “cancel the pricing-page review”."})
+        return {}
+
+    session_tools.set_pending_action(session_id, {
+        "type": "delete_event",
+        "action_item_id": target["id"],
+        "event_id": target["external_ref"],
+        "summary": target["task"],
+    })
+    writer({"kind": "calendar_action", "action": "delete_event", "title": target["task"],
+            "when": None, "detail": f"Remove “{target['task']}” from your calendar."})
+    writer({"kind": "say", "text": f"I'll remove “{target['task']}” from your calendar and reopen "
+            "the task. Approve to confirm, or decline to keep it."})
     return {}
 
 
@@ -196,6 +265,9 @@ async def comms_node(state: GraphState) -> dict:
     session_id = state["session_id"]
     message = extract_text(state["messages"][-1].content)
     open_items = board_tools.list_items(session_id, open_only=True)
+
+    if _wants_cancel_event(message):
+        return await _cancel_event(state, message)
 
     if _wants_reschedule(message):
         return await _reschedule(state, message)
@@ -277,7 +349,7 @@ async def comms_node(state: GraphState) -> dict:
         )
         writer(
             {"kind": "say", "text": f"I can add {len(events)} calendar event"
-             f"{'s' if len(events) != 1 else ''}:\n{lines}{warn}\n\nReply “yes” to add them, "
+             f"{'s' if len(events) != 1 else ''}:\n{lines}{warn}\n\nApprove below to add them, "
              "or tell me what to change."}
         )
         return {}
@@ -304,10 +376,17 @@ async def comms_node(state: GraphState) -> dict:
         + (f", due {i['due_date']}" if i.get("due_date") else "")
         for i in open_items
     )
+    # Sign the email with the sender's real name (fall back to the email's local part).
+    sender = state.get("user_name") or (
+        (state.get("user_email") or "").split("@")[0] or "The team"
+    )
     draft: EmailDraft = await llm.ainvoke(
         [
             SystemMessage(content=EMAIL_SYSTEM),
-            HumanMessage(content=f"Action items:\n{item_lines}"),
+            HumanMessage(
+                content=f"Sender name (use in the sign-off): {sender}\n\n"
+                f"Action items:\n{item_lines}"
+            ),
         ]
     )
     writer(
@@ -333,6 +412,6 @@ async def comms_node(state: GraphState) -> dict:
     writer(
         {"kind": "say", "text": "Here's a draft follow-up:\n\n"
          f"To: {', '.join(to)}\nSubject: {draft.subject}\n\n{draft.body}\n\n"
-         "Reply “yes” to send it, or tell me what to change."}
+         "Use the buttons below to send it, or tell me what to change."}
     )
     return {}

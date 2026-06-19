@@ -24,6 +24,7 @@ GMAIL_SEND = "GMAIL_SEND_EMAIL"
 CALENDAR_CREATE = "GOOGLECALENDAR_CREATE_EVENT"
 CALENDAR_LIST = "GOOGLECALENDAR_EVENTS_LIST"
 CALENDAR_UPDATE = "GOOGLECALENDAR_UPDATE_EVENT"
+CALENDAR_DELETE = "GOOGLECALENDAR_DELETE_EVENT"
 
 # Map our toolkit param to the Composio toolkit slug used for connected-account lookup.
 _TOOLKIT_FOR_SLUG = {
@@ -31,6 +32,7 @@ _TOOLKIT_FOR_SLUG = {
     CALENDAR_CREATE: "googlecalendar",
     CALENDAR_LIST: "googlecalendar",
     CALENDAR_UPDATE: "googlecalendar",
+    CALENDAR_DELETE: "googlecalendar",
 }
 
 
@@ -102,7 +104,11 @@ def send_gmail(*, user_id: str, to: list[str], subject: str, body: str) -> dict[
             "subject": subject,
             "detail": "No COMPOSIO_API_KEY set — email drafted but not actually sent.",
         }
-    arguments: dict[str, Any] = {"recipient_email": to[0], "subject": subject, "body": body}
+    # Send as plain text so the body's newlines/bullets render as written (HTML would collapse
+    # them onto one line).
+    arguments: dict[str, Any] = {
+        "recipient_email": to[0], "subject": subject, "body": body, "is_html": False,
+    }
     if len(to) > 1:
         arguments["extra_recipients"] = to[1:]
     try:
@@ -210,6 +216,19 @@ def update_calendar_event(
         arguments["summary"] = summary
     try:
         out = _execute(CALENDAR_UPDATE, arguments, user_id=user_id)
+    except Exception as exc:
+        return {"status": "error", "error": str(exc), "event_id": event_id}
+    out["event_id"] = event_id
+    return out
+
+
+def delete_calendar_event(*, user_id: str, event_id: str) -> dict[str, Any]:
+    """Remove an existing event from the user's primary calendar."""
+    if not composio_enabled():
+        return {"status": "simulated", "event_id": event_id}
+    arguments: dict[str, Any] = {"event_id": event_id, "calendar_id": "primary"}
+    try:
+        out = _execute(CALENDAR_DELETE, arguments, user_id=user_id)
     except Exception as exc:
         return {"status": "error", "error": str(exc), "event_id": event_id}
     out["event_id"] = event_id

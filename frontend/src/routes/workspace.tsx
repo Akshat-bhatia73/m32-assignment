@@ -91,7 +91,11 @@ export function WorkspacePage() {
 
   const refresh = useCallback(async () => {
     if (!currentId) return
-    setAll(await api.getActions(currentId))
+    const items = await api.getActions(currentId)
+    setAll(items)
+    // Keep React Query's cache authoritative too, so switching sessions and back doesn't
+    // re-seed the board from a stale snapshot that's missing this turn's items.
+    queryClient.setQueryData(["actions", currentId], items)
     // A turn may have created or moved calendar events — refresh the agenda.
     queryClient.invalidateQueries({ queryKey: ["calendar-events"] })
   }, [currentId, setAll, queryClient])

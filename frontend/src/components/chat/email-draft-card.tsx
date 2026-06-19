@@ -1,20 +1,24 @@
-import { Check, Copy, Mail } from "lucide-react"
+import { Check, Copy, Mail, X } from "lucide-react"
 import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { IconButton } from "@/components/ui/icon-button"
 import type { EmailDraftEvent } from "@/lib/types"
 
-/** Renders a follow-up email draft as a structured card with a one-click send action. */
+/** Renders a follow-up email draft as a structured card with one-click send / dismiss actions. */
 export function EmailDraftCard({
   draft,
   onSend,
+  onDecline,
   sent,
+  declined,
   busy,
 }: {
   draft: EmailDraftEvent
   onSend: () => void
+  onDecline: () => void
   sent: boolean
+  declined: boolean
   busy: boolean
 }) {
   const [copied, setCopied] = useState(false)
@@ -45,7 +49,16 @@ export function EmailDraftCard({
         >
           {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
         </IconButton>
-        <Button size="sm" onClick={onSend} disabled={sent || busy}>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={onDecline}
+          disabled={sent || declined || busy}
+        >
+          <X className="size-4" />
+          {declined ? "Dismissed" : "Dismiss"}
+        </Button>
+        <Button size="sm" onClick={onSend} disabled={sent || declined || busy}>
           <Mail className="size-4" />
           {sent ? "Sent" : "Send via Gmail"}
         </Button>

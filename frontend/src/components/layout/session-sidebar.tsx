@@ -70,7 +70,7 @@ export function SessionSidebar({
           <CheckSquare className="size-4" />
         </div>
         <div className="leading-tight">
-          <p className="text-sm font-semibold text-foreground">Meeting → Done</p>
+          <p className="text-sm font-semibold text-foreground">[Meeting]32</p>
           <p className="text-xs text-muted-foreground">Ops Copilot</p>
         </div>
       </div>

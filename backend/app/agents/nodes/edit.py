@@ -14,8 +14,9 @@ from langgraph.config import get_stream_writer
 from pydantic import BaseModel, Field
 
 from app.agents.conversation import extract_text
+from app.agents.people import resolve_owner_name
 from app.agents.state import GraphState
-from app.agents.tools import board_tools
+from app.agents.tools import board_tools, composio_tools
 
 EDIT_SYSTEM = (
     "You translate a user's request into changes on their action-item board.\n"
@@ -62,7 +63,11 @@ async def edit_node(state: GraphState) -> dict:
     writer = get_stream_writer()
     session_id = state["session_id"]
     user_id = state["user_id"]
+    members = state.get("members") or []
     board = board_tools.list_items(session_id)
+    # id -> connected calendar event id, so deleting a scheduled item also cleans up the event.
+    external_refs = {i["id"]: i.get("external_ref") for i in board}
+    composio_user_id = state.get("user_email") or str(session_id)
 
     request = extract_text(state["messages"][-1].content)
 
@@ -95,12 +100,19 @@ async def edit_node(state: GraphState) -> dict:
                 org_id=state.get("org_id"),
                 meeting_id=None,
                 task=edit.task,
-                owner=edit.owner,
+                owner=resolve_owner_name(edit.owner, members),
                 due_date=edit.due_date,
             )
             writer({"kind": "board", **event})
             created.append(event)
         elif edit.op == "delete" and edit.target_id:
+            # If the item was on the calendar, remove that event too — otherwise it lingers
+            # after the task vanishes from the board.
+            ext_ref = external_refs.get(edit.target_id)
+            if ext_ref:
+                composio_tools.delete_calendar_event(
+                    user_id=composio_user_id, event_id=ext_ref
+                )
             event = board_tools.delete_action_item(edit.target_id)
             if event:
                 writer({"kind": "board", **event})
@@ -109,7 +121,7 @@ async def edit_node(state: GraphState) -> dict:
             event = board_tools.update_action_item(
                 edit.target_id,
                 task=edit.task,
-                owner=edit.owner,
+                owner=resolve_owner_name(edit.owner, members) if edit.owner else edit.owner,
                 due_date=edit.due_date,
                 status=edit.status,
             )

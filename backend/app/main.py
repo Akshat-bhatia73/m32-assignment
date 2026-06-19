@@ -15,7 +15,7 @@ from app.api.routes import (
 )
 from app.config import settings
 
-app = FastAPI(title="Meeting → Done — Ops Copilot API", version="0.1.0")
+app = FastAPI(title="[Meeting]32 — Ops Copilot API", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,

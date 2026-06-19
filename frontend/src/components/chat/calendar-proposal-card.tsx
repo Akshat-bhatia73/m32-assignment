@@ -1,4 +1,4 @@
-import { CalendarPlus, Check, TriangleAlert } from "lucide-react"
+import { CalendarPlus, Check, TriangleAlert, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import type { CalendarProposalEvent } from "@/lib/types"
@@ -19,12 +19,16 @@ function formatSlot(start: string, date: string): string {
 export function CalendarProposalCard({
   proposal,
   onConfirm,
+  onDecline,
   confirmed,
+  declined,
   busy,
 }: {
   proposal: CalendarProposalEvent
   onConfirm: () => void
+  onDecline: () => void
   confirmed: boolean
+  declined: boolean
   busy: boolean
 }) {
   const conflicts = proposal.events.filter((e) => e.conflict).length
@@ -57,8 +61,17 @@ export function CalendarProposalCard({
           </li>
         ))}
       </ul>
-      <div className="flex items-center justify-end px-4 py-3">
-        <Button size="sm" onClick={onConfirm} disabled={confirmed || busy}>
+      <div className="flex items-center justify-end gap-2 px-4 py-3">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={onDecline}
+          disabled={confirmed || declined || busy}
+        >
+          <X className="size-4" />
+          {declined ? "Dismissed" : "Dismiss"}
+        </Button>
+        <Button size="sm" onClick={onConfirm} disabled={confirmed || declined || busy}>
           {confirmed ? <Check className="size-4" /> : <CalendarPlus className="size-4" />}
           {confirmed ? "Added" : "Add to calendar"}
         </Button>

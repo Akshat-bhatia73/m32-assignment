@@ -158,3 +158,13 @@ export type CalendarProposalItem = {
 export type CalendarProposalEvent = {
   events: CalendarProposalItem[]
 }
+
+/** Payload of a streamed `data-calendar-action` part — a reschedule/cancel awaiting approval. */
+export type CalendarActionEvent = {
+  action: "reschedule_event" | "delete_event"
+  title: string
+  /** Human-readable target time for a reschedule, or null for a cancellation. */
+  when: string | null
+  /** One-line description of what will happen. */
+  detail: string
+}

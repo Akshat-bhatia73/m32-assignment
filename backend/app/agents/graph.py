@@ -174,6 +174,12 @@ async def stream_agent(
                 yield ai_stream.sse(
                     ai_stream.data_part("calendar-proposal", proposal, part_id=uuid.uuid4().hex)
                 ), None
+            elif kind == "calendar_action":
+                action = {k: v for k, v in chunk.items() if k != "kind"}
+                persist_parts.append({"type": "calendar-action", "data": action})
+                yield ai_stream.sse(
+                    ai_stream.data_part("calendar-action", action, part_id=uuid.uuid4().hex)
+                ), None
             elif kind == "say":
                 # Deterministic assistant text from a node (edits / drafts / confirmations).
                 if not text_open:
