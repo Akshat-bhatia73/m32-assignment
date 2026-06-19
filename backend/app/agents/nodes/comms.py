@@ -207,6 +207,30 @@ def _recent_context(state: GraphState, limit: int = 6) -> str:
     return "\n".join(lines) or "(no prior turns)"
 
 
+def _email_recipients(
+    message: str,
+    members: list[dict],
+    pending: dict | None,
+    fallback: set[str],
+) -> list[str]:
+    """Resolve explicit addresses/names, or preserve the current draft recipients on revision."""
+    explicit = {email.lower() for email in EMAIL_RE.findall(message)}
+    if explicit:
+        return sorted(explicit)
+    words = set(re.findall(r"[a-z]+", message.lower()))
+    named = {
+        member["email"].lower()
+        for member in members
+        if member.get("email")
+        and set(re.findall(r"[a-z]+", (member.get("name") or "").lower())) & words
+    }
+    if named:
+        return sorted(named)
+    if pending and pending.get("type") == "send_email" and pending.get("to"):
+        return sorted({email.lower() for email in pending["to"]})
+    return sorted(fallback)
+
+
 def _board_ref_map(session_id) -> dict[str, str]:
     """event_id -> board item id, for app-scheduled events (so we can reopen the task on delete)."""
     return {
@@ -525,14 +549,10 @@ async def _draft_email(state: GraphState, message: str) -> dict:
 
     # Recipients: an address the user named wins; otherwise fall back to item owners + the
     # organizer (the meeting-follow-up default).
-    explicit = sorted({e.lower() for e in EMAIL_RE.findall(message)})
-    if explicit:
-        to = explicit
-    else:
-        fallback = _resolve_owner_emails(open_items, members)
-        if organizer:
-            fallback = fallback | {organizer}
-        to = sorted(fallback)
+    fallback = _resolve_owner_emails(open_items, members)
+    if organizer:
+        fallback = fallback | {organizer}
+    to = _email_recipients(message, members, state.get("pending_action"), fallback)
     if not to:
         writer({"kind": "say", "text": "Who should I send this to? Tell me an email address and "
                 "I'll draft it."})

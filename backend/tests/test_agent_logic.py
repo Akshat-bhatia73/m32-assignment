@@ -4,11 +4,12 @@ from types import SimpleNamespace
 
 from app.agents.nodes.comms import (
     _conflict_for,
+    _email_recipients,
     _existing_intervals,
     _resolve_owner_emails,
 )
 from app.agents.nodes.respond import _pending_context
-from app.agents.nodes.router import _is_explicit_confirmation
+from app.agents.nodes.router import RouteDecision, _resolve_route
 from app.api.routes.chat import _message_context
 from app.services.transcript import _clean_captions
 
@@ -18,13 +19,22 @@ MEMBERS = [
 ]
 
 
-def test_confirmation_gate_rejects_questions_and_corrections():
-    assert _is_explicit_confirmation("yes")
-    assert _is_explicit_confirmation("send it")
-    assert _is_explicit_confirmation("no")
-    assert not _is_explicit_confirmation("Don't we have to send it to Priya?")
-    assert not _is_explicit_confirmation("Yes, but change the recipient first")
-    assert not _is_explicit_confirmation("Is this going to Priya?")
+def test_dialogue_act_routing_keeps_pending_questions_and_changes_safe():
+    assert _resolve_route(
+        RouteDecision(domain="chat", pending_relation="question"), True
+    ) == "chat"
+    assert _resolve_route(
+        RouteDecision(domain="comms", pending_relation="modify"), True
+    ) == "comms"
+    assert _resolve_route(
+        RouteDecision(domain="chat", pending_relation="approve"), True
+    ) == "confirm"
+    assert _resolve_route(
+        RouteDecision(domain="chat", pending_relation="reject"), True
+    ) == "confirm"
+    assert _resolve_route(
+        RouteDecision(domain="chat", pending_relation="approve"), False
+    ) == "chat"
 
 
 def test_pending_email_context_is_available_to_chat():
@@ -33,6 +43,16 @@ def test_pending_email_context_is_available_to_chat():
     )
     assert "not sent" in context
     assert "wrong@example.com" in context
+
+
+def test_email_revision_resolves_named_member_or_preserves_current_recipient():
+    pending = {"type": "send_email", "to": ["current@example.com"]}
+    assert _email_recipients("Send this to Priya instead", MEMBERS, pending, set()) == [
+        "priya@acme.com"
+    ]
+    assert _email_recipients("Make the subject shorter", MEMBERS, pending, set()) == [
+        "current@example.com"
+    ]
 
 
 def test_message_context_restores_attachment_contents_for_follow_up_turns():
