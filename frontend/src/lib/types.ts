@@ -168,3 +168,23 @@ export type CalendarActionEvent = {
   /** One-line description of what will happen. */
   detail: string
 }
+
+/** Reasoning effort for reasoning-capable models. */
+export type ReasoningEffort = "low" | "medium" | "high"
+
+/** A selectable LLM from the backend catalog (only models with a configured key are returned). */
+export type ModelInfo = {
+  id: string
+  label: string
+  provider: "openai" | "google"
+  blurb: string
+  supports_reasoning: boolean
+  reasoning_options: ReasoningEffort[]
+  default_reasoning: ReasoningEffort | null
+}
+
+/** Response of GET /models — the available catalog plus the server's default pick. */
+export type ModelsResponse = {
+  default: { model: string; reasoning: ReasoningEffort | null }
+  models: ModelInfo[]
+}

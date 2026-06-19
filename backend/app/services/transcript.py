@@ -55,7 +55,7 @@ def _extract_pdf(data: bytes) -> str:
 
 
 async def _extract_image(data: bytes, content_type: str) -> str:
-    from app.llm.provider import get_llm, has_llm
+    from app.llm.provider import get_classifier_llm, has_llm
 
     if not has_llm():
         raise TranscriptError("Image transcription needs an LLM key configured on the server.")
@@ -65,7 +65,7 @@ async def _extract_image(data: bytes, content_type: str) -> str:
 
     mime = content_type if content_type in _IMAGE_TYPES else "image/png"
     b64 = base64.b64encode(data).decode("ascii")
-    llm = get_llm(temperature=0.0)
+    llm = get_classifier_llm()
     try:
         ai = await llm.ainvoke(
             [

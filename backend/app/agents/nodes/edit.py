@@ -60,7 +60,7 @@ def _describe(event: dict) -> str:
 
 
 async def edit_node(state: GraphState) -> dict:
-    from app.llm.provider import get_llm
+    from app.llm.provider import get_classifier_llm
 
     writer = get_stream_writer()
     session_id = state["session_id"]
@@ -83,7 +83,7 @@ async def edit_node(state: GraphState) -> dict:
         }
     )
 
-    llm = get_llm(temperature=0.0).with_structured_output(EditPlan)
+    llm = get_classifier_llm().with_structured_output(EditPlan)
     plan: EditPlan = await llm.ainvoke(
         [
             SystemMessage(content=EDIT_SYSTEM.format(today=date.today().isoformat())),

@@ -26,7 +26,7 @@ from app.agents.nodes.router import router_node
 from app.agents.nodes.summarize import summarize_node
 from app.agents.state import GraphState
 from app.agents.tools import session_tools
-from app.llm.provider import has_llm
+from app.llm.provider import has_llm, set_active_model
 from app.services import ai_stream
 
 # Nodes whose LLM tokens should stream to the user as assistant text.
@@ -107,6 +107,8 @@ async def stream_agent(
     user_email: str | None = None,
     org_id: uuid.UUID | None = None,
     members: list[dict] | None = None,
+    model: str | None = None,
+    reasoning: str | None = None,
 ) -> AsyncGenerator[tuple[str, dict | None], None]:
     """Yield (sse_chunk, final|None) pairs.
 
@@ -117,6 +119,10 @@ async def stream_agent(
         async for pair in _echo(new_message):
             yield pair
         return
+
+    # Pin the user-selected conversation model for every node in this turn (resolved/validated;
+    # falls back to the server default for an unknown model or a provider with no key).
+    set_active_model(model, reasoning)
 
     graph = get_graph()
     inputs: GraphState = {

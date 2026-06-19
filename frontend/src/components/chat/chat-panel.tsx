@@ -15,6 +15,7 @@ import { ArtifactViewer } from "@/components/chat/artifact-viewer"
 import { CalendarActionCard } from "@/components/chat/calendar-action-card"
 import { CalendarProposalCard } from "@/components/chat/calendar-proposal-card"
 import { EmailDraftCard } from "@/components/chat/email-draft-card"
+import { ModelSelector } from "@/components/chat/model-selector"
 import { ThinkingTrail } from "@/components/chat/thinking-trail"
 import { ToolPartView } from "@/components/chat/tool-part"
 import { IconButton } from "@/components/ui/icon-button"
@@ -32,6 +33,7 @@ import type {
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useBoardStore } from "@/stores/board-store"
+import { activeModel, activeReasoning, useModelStore } from "@/stores/model-store"
 
 const UPLOAD_ACCEPT = ".txt,.md,.markdown,.csv,.log,.pdf,image/png,image/jpeg,image/webp,image/gif"
 // A pasted blob longer than this is captured as an artifact instead of filling the composer.
@@ -123,12 +125,16 @@ export function ChatPanel({
           content: a.content,
           mime: a.mime ?? null,
         }))
+        // Read the picked model at send time (non-reactive) so the latest choice is always sent.
+        const ms = useModelStore.getState()
         return {
           body: {
             session_id: id,
             message: text,
             artifacts,
             regenerate: trigger === "regenerate-message",
+            model: activeModel(ms)?.id ?? null,
+            reasoning: activeReasoning(ms),
           },
         }
       },
@@ -495,6 +501,10 @@ export function ChatPanel({
             <IconButton tooltip="Send" type="submit" className="size-9 shrink-0" disabled={!canSend}>
               {busy ? <Spinner className="size-4" /> : <Send className="size-4" />}
             </IconButton>
+          </div>
+          {/* Composer toolbar — pick the model that writes the reply. */}
+          <div className="flex items-center gap-1 px-1 pt-1.5">
+            <ModelSelector disabled={busy} />
           </div>
         </form>
         <p className="mx-auto mt-2 max-w-3xl px-1 text-center text-xs text-muted-foreground">

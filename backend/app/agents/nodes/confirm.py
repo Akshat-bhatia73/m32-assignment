@@ -41,9 +41,9 @@ async def _decide(message: str) -> str:
     quick = _quick_decision(message)
     if quick:
         return quick
-    from app.llm.provider import get_llm
+    from app.llm.provider import get_classifier_llm
 
-    llm = get_llm(temperature=0.0).with_structured_output(Affirmation)
+    llm = get_classifier_llm().with_structured_output(Affirmation)
     result: Affirmation = await llm.ainvoke(
         [
             SystemMessage(

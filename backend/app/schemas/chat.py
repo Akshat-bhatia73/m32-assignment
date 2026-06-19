@@ -57,3 +57,7 @@ class ChatRequest(BaseModel):
     # When true, re-run the last user turn and replace the last assistant reply (retry),
     # rather than recording a new user message.
     regenerate: bool = False
+    # The conversation model the user picked (catalog id); None falls back to the server default.
+    model: str | None = None
+    # Reasoning effort for reasoning-capable models ("low" | "medium" | "high"); ignored otherwise.
+    reasoning: str | None = None

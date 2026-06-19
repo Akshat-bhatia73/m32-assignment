@@ -5,6 +5,7 @@ import type {
   ChatMessage,
   ExtractedTranscript,
   IntegrationStatus,
+  ModelsResponse,
   Org,
   Session,
   User,
@@ -57,6 +58,8 @@ export const api = {
   deleteSession: (id: string) => request<void>(`/sessions/${id}`, { method: "DELETE" }),
   getMessages: (sessionId: string) =>
     request<ChatMessage[]>(`/sessions/${sessionId}/messages`),
+
+  getModels: () => request<ModelsResponse>("/models"),
 
   getActions: (sessionId: string) =>
     request<ActionItem[]>(`/sessions/${sessionId}/actions`),

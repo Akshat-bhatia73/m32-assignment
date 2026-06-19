@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.agents.conversation import extract_text
 from app.agents.state import GraphState
-from app.llm.provider import get_llm
+from app.llm.provider import get_classifier_llm
 
 ROUTER_SYSTEM = (
     "You route a user's latest message in an operations-copilot chat. Choose one route:\n"
@@ -54,7 +54,7 @@ async def router_node(state: GraphState) -> dict:
         if pending
         else "There is no pending action."
     )
-    llm = get_llm(temperature=0.0).with_structured_output(RouteDecision)
+    llm = get_classifier_llm().with_structured_output(RouteDecision)
     decision: RouteDecision = await llm.ainvoke(
         [
             SystemMessage(content=ROUTER_SYSTEM),

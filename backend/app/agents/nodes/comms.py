@@ -111,9 +111,9 @@ class CommsIntent(BaseModel):
 async def _classify_comms(state: GraphState, message: str) -> str:
     """Pick the comms sub-intent with an LLM (robust to topic words like 'schedule' inside an
     email request) — replaces brittle keyword matching."""
-    from app.llm.provider import get_llm
+    from app.llm.provider import get_classifier_llm
 
-    llm = get_llm(temperature=0.0).with_structured_output(CommsIntent)
+    llm = get_classifier_llm().with_structured_output(CommsIntent)
     res: CommsIntent = await llm.ainvoke([
         SystemMessage(content=(
             "Classify the user's request in an email + calendar assistant. Pick ONE intent based "
@@ -284,7 +284,7 @@ async def _calendar_view(state: GraphState, message: str) -> dict:
 
 async def _reschedule(state: GraphState, message: str) -> dict:
     """Match a move/rename request to a REAL calendar event and queue the edit."""
-    from app.llm.provider import get_llm
+    from app.llm.provider import get_classifier_llm
 
     writer = get_stream_writer()
     session_id = state["session_id"]
@@ -297,7 +297,7 @@ async def _reschedule(state: GraphState, message: str) -> dict:
         return {}
 
     today = datetime.now(_tz()).date().isoformat()
-    llm = get_llm(temperature=0.0).with_structured_output(RescheduleParse)
+    llm = get_classifier_llm().with_structured_output(RescheduleParse)
     parsed: RescheduleParse = await llm.ainvoke([
         SystemMessage(content=(
             "Match the user's request to one of their calendar events and resolve any changes to "
@@ -353,7 +353,7 @@ async def _cancel_event(state: GraphState, message: str) -> dict:
     Resolves references in context: 'delete all these' after listing *today's* events means
     today's events — not every event in the fetch window.
     """
-    from app.llm.provider import get_llm
+    from app.llm.provider import get_classifier_llm
 
     writer = get_stream_writer()
     session_id = state["session_id"]
@@ -368,7 +368,7 @@ async def _cancel_event(state: GraphState, message: str) -> dict:
         return {}
 
     today = datetime.now(_tz()).date().isoformat()
-    llm = get_llm(temperature=0.0).with_structured_output(CancelParse)
+    llm = get_classifier_llm().with_structured_output(CancelParse)
     parsed: CancelParse = await llm.ainvoke([
         SystemMessage(content=(
             f"Decide which calendar events the user wants removed. Today is {today}.\n"

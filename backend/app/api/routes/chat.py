@@ -103,6 +103,8 @@ def chat_stream(
                 current_user.email,
                 org_id=org_id,
                 members=members,
+                model=payload.model,
+                reasoning=payload.reasoning,
             ):
                 if final is not None:
                     assistant_text = final["text"]

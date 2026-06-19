@@ -35,14 +35,14 @@ async def generate_title(text: str) -> str:
     Falls back to a trimmed snippet when no LLM is configured or the call fails, so a session
     always gets a usable title.
     """
-    from app.llm.provider import get_llm, has_llm
+    from app.llm.provider import get_classifier_llm, has_llm
 
     snippet = " ".join(text.split())
     fallback = (snippet[:57].rstrip() + "…") if len(snippet) > 60 else (snippet or "New session")
     if not has_llm():
         return fallback
     try:
-        llm = get_llm(temperature=0.0)
+        llm = get_classifier_llm()
         ai = await llm.ainvoke(
             [SystemMessage(content=_TITLE_SYSTEM), HumanMessage(content=text[:1200])]
         )

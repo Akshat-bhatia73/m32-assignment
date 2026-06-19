@@ -15,7 +15,7 @@ from app.agents.conversation import extract_text
 from app.agents.people import resolve_owner_name
 from app.agents.state import GraphState
 from app.agents.tools import board_tools
-from app.llm.provider import get_llm
+from app.llm.provider import get_classifier_llm
 
 EXTRACTOR_SYSTEM = (
     "You extract concrete action items from meeting notes for a small-business owner.\n"
@@ -57,7 +57,7 @@ async def extractor_node(state: GraphState) -> dict:
         }
     )
 
-    llm = get_llm(temperature=0.0).with_structured_output(Extraction)
+    llm = get_classifier_llm().with_structured_output(Extraction)
     result: Extraction = await llm.ainvoke(
         [
             SystemMessage(content=EXTRACTOR_SYSTEM.format(today=date.today().isoformat())),

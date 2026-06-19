@@ -10,6 +10,7 @@ from app.api.routes import (
     chat,
     integrations,
     meetings,
+    models,
     orgs,
     sessions,
 )
@@ -28,6 +29,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(sessions.router)
 app.include_router(chat.router)
+app.include_router(models.router)
 app.include_router(meetings.router)
 app.include_router(actions.router)
 app.include_router(integrations.router)
