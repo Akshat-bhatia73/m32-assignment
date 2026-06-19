@@ -7,7 +7,7 @@ work gets organized, assigned, and scheduled.
 
 > M32 Fullstack + AI take-home. The name is a play on **M32** → **[Meeting]32**.
 
-**🔗 Live app:** _<add hosted URL>_ · **📹 Demo video:** _<add link>_
+**🔗 Live app:** https://m32-assignment.akshat-bhatia.com · **📹 Demo video:** https://drive.google.com/file/d/1y4dJoPyPFAMOKK0d_v_POXGHNB_4wZOL/view?usp=sharing
 
 > ⏱️ **First load may be slow.** The hosted backend runs on Render's free tier, which spins down
 > after inactivity. The **first request after a cold start can take ~50–60s** while the service
