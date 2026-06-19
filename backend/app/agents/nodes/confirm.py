@@ -190,13 +190,14 @@ async def confirm_node(state: GraphState) -> dict:
             writer({"kind": "say", "text": "I couldn't move that event. Google Calendar may not "
                     f"be connected for {composio_user_id} — check Settings and try again.{hint}"})
             return {}  # keep pending for retry
-        # Reflect the new date + title on the board item.
-        new_date = pending["start_datetime"].split("T")[0]
-        board_event = board_tools.update_action_item(
-            pending["action_item_id"], task=pending.get("summary"), due_date=new_date
-        )
-        if board_event:
-            writer({"kind": "board", **board_event})
+        # Reflect the new date + title on the board item, if this event is linked to one.
+        if pending.get("action_item_id"):
+            new_date = pending["start_datetime"].split("T")[0]
+            board_event = board_tools.update_action_item(
+                pending["action_item_id"], task=pending.get("summary"), due_date=new_date
+            )
+            if board_event:
+                writer({"kind": "board", **board_event})
         session_tools.set_pending_action(session_id, None)
         sim = " (simulated — add a Composio key to update it for real)" if status == "simulated" \
             else ""
@@ -204,35 +205,50 @@ async def confirm_node(state: GraphState) -> dict:
         writer({"kind": "say", "text": f"Updated “{pending['summary']}” — now {when}{sim}."})
         return {}
 
-    if action_type == "delete_event":
+    if action_type in ("delete_event", "delete_events"):
+        # Normalize singular + plural into one list of {event_id, summary, action_item_id}.
+        targets = pending.get("events") or [
+            {"event_id": pending.get("event_id"), "summary": pending.get("summary"),
+             "action_item_id": pending.get("action_item_id")}
+        ]
         tool_call_id = uuid.uuid4().hex
         writer({
-            "kind": "tool_input", "tool_call_id": tool_call_id, "tool_name": "delete_event",
-            "input": {"summary": pending.get("summary")},
+            "kind": "tool_input", "tool_call_id": tool_call_id, "tool_name": "delete_events",
+            "input": {"events": len(targets)},
         })
-        res = composio_tools.delete_calendar_event(
-            user_id=composio_user_id, event_id=pending["event_id"]
-        )
-        status = res.get("status")
-        writer({"kind": "tool_output", "tool_call_id": tool_call_id, "output": {"status": status}})
-        if status == "error":
-            detail = res.get("error")
-            logger.error("Calendar delete failed for user_id=%s: %s", composio_user_id, detail)
-            hint = f" (details: {detail})" if detail else ""
-            writer({"kind": "say", "text": "I couldn't remove that event. Google Calendar may not "
-                    f"be connected for {composio_user_id} — check Settings and try again.{hint}"})
+        removed, failed, sim_any = [], 0, False
+        last_error: str | None = None
+        for ev in targets:
+            res = composio_tools.delete_calendar_event(
+                user_id=composio_user_id, event_id=ev["event_id"]
+            )
+            status = res.get("status")
+            if status == "error":
+                failed += 1
+                last_error = res.get("error") or last_error
+                continue
+            sim_any = sim_any or status == "simulated"
+            # Reopen the linked task (if any) now that the event is gone.
+            if ev.get("action_item_id"):
+                board_event = board_tools.set_status(
+                    ev["action_item_id"], "open", external_ref=""
+                )
+                if board_event:
+                    writer({"kind": "board", **board_event})
+            removed.append(ev.get("summary") or "(no title)")
+        writer({"kind": "tool_output", "tool_call_id": tool_call_id,
+                "output": {"removed": len(removed), "failed": failed}})
+        if not removed:
+            logger.error("Calendar delete failed for user_id=%s: %s", composio_user_id, last_error)
+            hint = f" (details: {last_error})" if last_error else ""
+            writer({"kind": "say", "text": "I couldn't remove those events. Google Calendar may "
+                    f"not be connected for {composio_user_id} — check Settings and retry.{hint}"})
             return {}  # keep pending for retry
-        # Reopen the task and drop the calendar link now that the event is gone.
-        board_event = board_tools.set_status(
-            pending["action_item_id"], "open", external_ref=""
-        )
-        if board_event:
-            writer({"kind": "board", **board_event})
         session_tools.set_pending_action(session_id, None)
-        sim = " (simulated — add a Composio key to remove it for real)" if status == "simulated" \
-            else ""
-        writer({"kind": "say", "text": f"Removed “{pending['summary']}” from your calendar and "
-                f"reopened the task{sim}."})
+        sim = " (simulated — add a Composio key to remove them for real)" if sim_any else ""
+        names = ", ".join(f"“{n}”" for n in removed)
+        tail = f" ({failed} couldn't be removed)" if failed else ""
+        writer({"kind": "say", "text": f"Removed {names} from your calendar{sim}{tail}."})
         return {}
 
     # Unknown / stale pending action.

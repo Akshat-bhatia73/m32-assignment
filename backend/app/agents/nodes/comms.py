@@ -126,9 +126,26 @@ def _wants_cancel_event(message: str) -> bool:
     return any(h in low for h in _CANCEL_HINTS) and any(w in low for w in _EVENT_WORDS)
 
 
+# Calendar-view phrasings ("what's on my calendar"), guarded against creation requests so
+# "add this to my calendar" still schedules instead of just listing.
+_VIEW_HINTS = ("what's on my", "whats on my", "what is on my", "what events", "what meetings",
+               "what do i have", "what's coming up", "whats coming up", "show me my",
+               "show my", "my schedule", "my agenda", "list my event", "any events",
+               "events today", "events for today", "on my calendar", "check my calendar",
+               "view my calendar", "see my calendar", "look at my calendar")
+_VIEW_GUARD = ("schedul", "add ", "create", "set up", "block ", "book ", "put ")
+
+
+def _wants_calendar_view(message: str) -> bool:
+    low = message.lower()
+    if any(g in low for g in _VIEW_GUARD):
+        return False
+    return any(h in low for h in _VIEW_HINTS)
+
+
 class RescheduleParse(BaseModel):
-    item_id: str | None = Field(
-        default=None, description="The id of the scheduled item to edit, or null if unclear."
+    event_id: str | None = Field(
+        default=None, description="The id of the calendar event to edit, or null if unclear."
     )
     new_datetime: str | None = Field(
         default=None,
@@ -142,63 +159,165 @@ class RescheduleParse(BaseModel):
 
 
 class CancelParse(BaseModel):
-    item_id: str | None = Field(
-        default=None, description="The id of the scheduled item whose event to remove, or null."
+    event_ids: list[str] = Field(
+        default_factory=list,
+        description="ids of the calendar events the user wants removed (one or more).",
     )
 
 
-def _scheduled_items(session_id) -> list[dict]:
-    items = board_tools.list_items(session_id)
-    return [i for i in items if i.get("status") == "scheduled" and i.get("external_ref")]
+def _view_window(message: str) -> tuple[int, int]:
+    """(days_from_today, span_in_days) to scope a calendar read to the user's phrasing."""
+    low = message.lower()
+    if "tomorrow" in low:
+        return (1, 1)
+    if "today" in low or "tonight" in low:
+        return (0, 1)
+    if "week" in low:
+        return (0, 7)
+    return (0, 14)
+
+
+def _list_user_events(state: GraphState, *, days_from: int = 0, days_span: int = 14) -> dict:
+    """Fetch the user's REAL Google Calendar events from the start of the window onward."""
+    user_email = state.get("user_email")
+    if not user_email:
+        return {"status": "error", "events": [], "error": "no_email"}
+    tz = _tz()
+    start = datetime.combine(
+        datetime.now(tz).date() + timedelta(days=days_from), time.min, tz
+    )
+    end = start + timedelta(days=days_span)
+    return composio_tools.list_calendar_events(
+        user_id=user_email,
+        time_min=start.astimezone(UTC).isoformat(),
+        time_max=end.astimezone(UTC).isoformat(),
+    )
+
+
+def _event_roster(events: list[dict]) -> str:
+    return "\n".join(
+        f"- id={e['id']} | {e.get('summary') or '(no title)'} | starts {e.get('start') or 'n/a'}"
+        for e in events
+    )
+
+
+def _board_ref_map(session_id) -> dict[str, str]:
+    """event_id -> board item id, for app-scheduled events (so we can reopen the task on delete)."""
+    return {
+        i["external_ref"]: i["id"]
+        for i in board_tools.list_items(session_id)
+        if i.get("external_ref")
+    }
+
+
+def _event_start_local(e: dict) -> str | None:
+    """The event's existing start as a tz-naive 'YYYY-MM-DDTHH:MM:SS' (for title-only edits)."""
+    raw = e.get("start")
+    if not raw:
+        return None
+    try:
+        if e.get("all_day"):
+            return f"{date.fromisoformat(raw).isoformat()}T{_EVENT_HOUR:02d}:00:00"
+        return datetime.fromisoformat(raw).strftime("%Y-%m-%dT%H:%M:%S")
+    except ValueError:
+        return None
+
+
+def _fmt_event_line(e: dict) -> str:
+    raw = e.get("start")
+    label = raw or ""
+    try:
+        if raw and e.get("all_day"):
+            label = date.fromisoformat(raw).strftime("%a %b %d (all day)")
+        elif raw:
+            label = datetime.fromisoformat(raw).strftime("%a %b %d, %I:%M %p")
+    except ValueError:
+        pass
+    title = e.get("summary") or "(no title)"
+    return f"• {title} — {label}" if label else f"• {title}"
+
+
+def _calendar_unavailable(writer, status: str, error: str | None) -> bool:
+    """Emit a grounded 'can't read your calendar' message; return True if we handled it."""
+    if status == "error" and error == "no_email":
+        writer({"kind": "say", "text": "I don't have your email on file to read your calendar."})
+        return True
+    if status == "simulated":
+        writer({"kind": "say", "text": "Your Google Calendar isn't connected yet, so I can't see "
+                "your real events. Connect it in Settings and I'll pull them up."})
+        return True
+    if status != "ok":
+        writer({"kind": "say", "text": "I couldn't reach your calendar just now — check that "
+                "Google Calendar is connected in Settings and try again."})
+        return True
+    return False
+
+
+async def _calendar_view(state: GraphState, message: str) -> dict:
+    """Answer a question about the calendar from the user's REAL events — never invented ones."""
+    writer = get_stream_writer()
+    days_from, days_span = _view_window(message)
+    tool_call_id = uuid.uuid4().hex
+    writer({"kind": "tool_input", "tool_call_id": tool_call_id,
+            "tool_name": "list_calendar_events", "input": {"days": days_span}})
+    res = _list_user_events(state, days_from=days_from, days_span=days_span)
+    events = res.get("events", [])
+    writer({"kind": "tool_output", "tool_call_id": tool_call_id,
+            "output": {"events": len(events), "status": res.get("status")}})
+    if _calendar_unavailable(writer, res.get("status"), res.get("error")):
+        return {}
+    if not events:
+        scope = "today" if days_span == 1 else "coming up"
+        writer({"kind": "say", "text": f"You have no events {scope} on your calendar."})
+        return {}
+    lines = "\n".join(_fmt_event_line(e) for e in events)
+    writer({"kind": "say", "text": f"Here's what's on your calendar:\n{lines}\n\nWant me to "
+            "reschedule or remove any of these?"})
+    return {}
 
 
 async def _reschedule(state: GraphState, message: str) -> dict:
-    """Parse a 'move/rename X' request against the scheduled items and queue an event edit."""
+    """Match a move/rename request to a REAL calendar event and queue the edit."""
     from app.llm.provider import get_llm
 
     writer = get_stream_writer()
     session_id = state["session_id"]
-    scheduled = _scheduled_items(session_id)
-    if not scheduled:
-        writer({"kind": "say", "text": "I don't see any scheduled events to change yet. Schedule "
-                "some items first, then I can edit them."})
+    res = _list_user_events(state)
+    if _calendar_unavailable(writer, res.get("status"), res.get("error")):
+        return {}
+    events = res.get("events", [])
+    if not events:
+        writer({"kind": "say", "text": "I don't see any upcoming events to change."})
         return {}
 
-    roster = "\n".join(
-        f"- id={i['id']} | {i['task']} | currently due {i.get('due_date') or 'n/a'}"
-        for i in scheduled
-    )
     today = datetime.now(_tz()).date().isoformat()
     llm = get_llm(temperature=0.0).with_structured_output(RescheduleParse)
     parsed: RescheduleParse = await llm.ainvoke([
         SystemMessage(content=(
-            "Match the user's request to one scheduled event and resolve any changes to its start "
-            f"time and/or title. Today is {today}. Use the configured timezone. Vague times: "
-            "morning=09:00, afternoon=14:00, evening=18:00. Return the item's id, an ISO local "
-            "datetime 'YYYY-MM-DDTHH:MM:SS' if the time changes (else null), and a new_title if "
-            "they're renaming it (else null). If you can't tell which event, return null item_id."
+            "Match the user's request to one of their calendar events and resolve any changes to "
+            f"its start time and/or title. Today is {today}. Use the configured timezone. Vague "
+            "times: morning=09:00, afternoon=14:00, evening=18:00. Return the event's id, an ISO "
+            "local datetime 'YYYY-MM-DDTHH:MM:SS' if the time changes (else null), and a new_title "
+            "if renaming (else null). If you can't tell which event, return null event_id."
         )),
-        HumanMessage(content=f"Scheduled events:\n{roster}\n\nRequest:\n{message}"),
+        HumanMessage(content=f"Calendar events:\n{_event_roster(events)}\n\nRequest:\n{message}"),
     ])
-    target = next((i for i in scheduled if i["id"] == parsed.item_id), None)
+    target = next((e for e in events if e["id"] == parsed.event_id), None)
     if not target or (not parsed.new_datetime and not parsed.new_title):
         writer({"kind": "say", "text": "I'm not sure which event to change or what to change. Try "
-                "e.g. “move the pricing-page review to tomorrow afternoon”."})
+                "e.g. “move the client call to tomorrow afternoon”."})
         return {}
 
-    # Keep the existing start when only the title changes (the event must keep a valid time).
-    start_dt = parsed.new_datetime or (
-        f"{target['due_date']}T{_EVENT_HOUR:02d}:00:00" if target.get("due_date") else None
-    )
+    start_dt = parsed.new_datetime or _event_start_local(target)
     if not start_dt:
         writer({"kind": "say", "text": "I couldn't work out the event's time. Tell me a date/time "
                 "and I'll update it."})
         return {}
-    new_summary = parsed.new_title or target["task"]
+    new_summary = parsed.new_title or (target.get("summary") or "(no title)")
     session_tools.set_pending_action(session_id, {
         "type": "reschedule_event",
-        "action_item_id": target["id"],
-        "event_id": target["external_ref"],
+        "action_item_id": _board_ref_map(session_id).get(target["id"]),
+        "event_id": target["id"],
         "summary": new_summary,
         "start_datetime": start_dt,
     })
@@ -209,7 +328,6 @@ async def _reschedule(state: GraphState, message: str) -> dict:
     if parsed.new_datetime:
         change.append(f"move it to {when}")
     detail = " and ".join(change) if change else f"update it ({when})"
-    # Structured part → the client renders an Approve / Decline card.
     writer({"kind": "calendar_action", "action": "reschedule_event", "title": new_summary,
             "when": when, "detail": f"I'll {detail}."})
     writer({"kind": "say", "text": f"I'll {detail}. Approve to update your calendar, or tell me a "
@@ -218,43 +336,55 @@ async def _reschedule(state: GraphState, message: str) -> dict:
 
 
 async def _cancel_event(state: GraphState, message: str) -> dict:
-    """Parse a 'cancel/remove the X event' request and queue a calendar deletion."""
+    """Match a cancel/remove request to REAL calendar events and queue their deletion."""
     from app.llm.provider import get_llm
 
     writer = get_stream_writer()
     session_id = state["session_id"]
-    scheduled = _scheduled_items(session_id)
-    if not scheduled:
-        writer({"kind": "say", "text": "I don't see any scheduled events to remove yet."})
+    days_from, days_span = _view_window(message)
+    res = _list_user_events(state, days_from=days_from, days_span=days_span)
+    if _calendar_unavailable(writer, res.get("status"), res.get("error")):
+        return {}
+    events = res.get("events", [])
+    if not events:
+        writer({"kind": "say", "text": "I don't see any events to remove in that window."})
         return {}
 
-    roster = "\n".join(
-        f"- id={i['id']} | {i['task']} | due {i.get('due_date') or 'n/a'}" for i in scheduled
-    )
     llm = get_llm(temperature=0.0).with_structured_output(CancelParse)
     parsed: CancelParse = await llm.ainvoke([
         SystemMessage(content=(
-            "Match the user's request to the one scheduled event they want removed from their "
-            "calendar. Return that item's id, or null if you can't tell which one."
+            "Return the ids of the calendar events the user wants removed. If they say 'all' or "
+            "'today's events', include every event listed. If you can't tell which, return an "
+            "empty list."
         )),
-        HumanMessage(content=f"Scheduled events:\n{roster}\n\nRequest:\n{message}"),
+        HumanMessage(content=f"Calendar events:\n{_event_roster(events)}\n\nRequest:\n{message}"),
     ])
-    target = next((i for i in scheduled if i["id"] == parsed.item_id), None)
-    if not target:
+    ids = set(parsed.event_ids)
+    targets = [e for e in events if e["id"] in ids]
+    if not targets:
         writer({"kind": "say", "text": "I'm not sure which event you mean. Tell me which one to "
-                "remove, e.g. “cancel the pricing-page review”."})
+                "remove, e.g. “cancel the client call”."})
         return {}
 
+    refs = _board_ref_map(session_id)
     session_tools.set_pending_action(session_id, {
-        "type": "delete_event",
-        "action_item_id": target["id"],
-        "event_id": target["external_ref"],
-        "summary": target["task"],
+        "type": "delete_events",
+        "events": [
+            {"event_id": e["id"], "summary": e.get("summary") or "(no title)",
+             "action_item_id": refs.get(e["id"])}
+            for e in targets
+        ],
     })
-    writer({"kind": "calendar_action", "action": "delete_event", "title": target["task"],
-            "when": None, "detail": f"Remove “{target['task']}” from your calendar."})
-    writer({"kind": "say", "text": f"I'll remove “{target['task']}” from your calendar and reopen "
-            "the task. Approve to confirm, or decline to keep it."})
+    names = ", ".join(f"“{e.get('summary') or '(no title)'}”" for e in targets)
+    detail = f"Remove {names} from your calendar."
+    if len(targets) == 1:
+        title = targets[0].get("summary") or "(no title)"
+    else:
+        title = f"{len(targets)} events"
+    writer({"kind": "calendar_action", "action": "delete_event", "title": title,
+            "when": None, "detail": detail})
+    writer({"kind": "say", "text": f"I'll remove {names} from your calendar. Approve to confirm, "
+            "or decline to keep them."})
     return {}
 
 
@@ -271,6 +401,9 @@ async def comms_node(state: GraphState) -> dict:
 
     if _wants_reschedule(message):
         return await _reschedule(state, message)
+
+    if _wants_calendar_view(message):
+        return await _calendar_view(state, message)
 
     if _wants_schedule(message):
         tool_call_id = uuid.uuid4().hex
