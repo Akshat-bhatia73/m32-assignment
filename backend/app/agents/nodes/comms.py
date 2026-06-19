@@ -8,7 +8,7 @@ import uuid
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.config import get_stream_writer
 from pydantic import BaseModel, Field
 
@@ -203,6 +203,21 @@ def _event_roster(events: list[dict]) -> str:
     )
 
 
+def _recent_context(state: GraphState, limit: int = 6) -> str:
+    """The last few turns as plain text, so the LLM can resolve references like 'these'/'those'
+    to the events it most recently listed (proper conversational context)."""
+    lines = []
+    for m in state["messages"][-limit:]:
+        text = extract_text(m.content).strip()
+        if not text:
+            continue
+        role = "User" if isinstance(m, HumanMessage) else (
+            "Assistant" if isinstance(m, AIMessage) else "")
+        if role:
+            lines.append(f"{role}: {text}")
+    return "\n".join(lines) or "(no prior turns)"
+
+
 def _board_ref_map(session_id) -> dict[str, str]:
     """event_id -> board item id, for app-scheduled events (so we can reopen the task on delete)."""
     return {
@@ -298,11 +313,17 @@ async def _reschedule(state: GraphState, message: str) -> dict:
         SystemMessage(content=(
             "Match the user's request to one of their calendar events and resolve any changes to "
             f"its start time and/or title. Today is {today}. Use the configured timezone. Vague "
-            "times: morning=09:00, afternoon=14:00, evening=18:00. Return the event's id, an ISO "
-            "local datetime 'YYYY-MM-DDTHH:MM:SS' if the time changes (else null), and a new_title "
-            "if renaming (else null). If you can't tell which event, return null event_id."
+            "times: morning=09:00, afternoon=14:00, evening=18:00. Use the recent conversation to "
+            "resolve references like 'it', 'that meeting', or 'the one you mentioned' to the right "
+            "event. Return the event's id, an ISO local datetime 'YYYY-MM-DDTHH:MM:SS' if the time "
+            "changes (else null), and a new_title if renaming (else null). If you can't tell which "
+            "event, return null event_id."
         )),
-        HumanMessage(content=f"Calendar events:\n{_event_roster(events)}\n\nRequest:\n{message}"),
+        HumanMessage(content=(
+            f"Recent conversation:\n{_recent_context(state)}\n\n"
+            f"EVENTS (id | title | start):\n{_event_roster(events)}\n\n"
+            f"Latest request:\n{message}"
+        )),
     ])
     target = next((e for e in events if e["id"] == parsed.event_id), None)
     if not target or (not parsed.new_datetime and not parsed.new_title):
@@ -338,28 +359,45 @@ async def _reschedule(state: GraphState, message: str) -> dict:
 
 
 async def _cancel_event(state: GraphState, message: str) -> dict:
-    """Match a cancel/remove request to REAL calendar events and queue their deletion."""
+    """Match a cancel/remove request to REAL calendar events and queue their deletion.
+
+    Resolves references in context: 'delete all these' after listing *today's* events means
+    today's events — not every event in the fetch window.
+    """
     from app.llm.provider import get_llm
 
     writer = get_stream_writer()
     session_id = state["session_id"]
-    days_from, days_span = _view_window(message)
-    res = _list_user_events(state, days_from=days_from, days_span=days_span)
+    # Fetch a wide candidate pool; the LLM scopes it using the conversation + request, so the
+    # window heuristic can't over-select (the bug where "these" deleted future events too).
+    res = _list_user_events(state, days_from=0, days_span=30)
     if _calendar_unavailable(writer, res.get("status"), res.get("error")):
         return {}
     events = res.get("events", [])
     if not events:
-        writer({"kind": "say", "text": "I don't see any events to remove in that window."})
+        writer({"kind": "say", "text": "I don't see any upcoming events to remove."})
         return {}
 
+    today = datetime.now(_tz()).date().isoformat()
     llm = get_llm(temperature=0.0).with_structured_output(CancelParse)
     parsed: CancelParse = await llm.ainvoke([
         SystemMessage(content=(
-            "Return the ids of the calendar events the user wants removed. If they say 'all' or "
-            "'today's events', include every event listed. If you can't tell which, return an "
-            "empty list."
+            f"Decide which calendar events the user wants removed. Today is {today}.\n"
+            "Use the recent conversation to resolve references — 'these', 'those', 'all of "
+            "them', 'the ones you listed' mean the events you MOST RECENTLY showed the user, "
+            "NOT every event in the list. Scope precisely:\n"
+            "- a specific event they name → just that one\n"
+            "- 'these' / 'all these' right after you listed today's events → only today's events\n"
+            "- 'today's events' → only events dated today; 'tomorrow's' → only tomorrow's\n"
+            "- 'everything on my calendar' / 'all my events' → every event listed\n"
+            "Return ONLY ids from the EVENTS list for events the user actually referred to. If "
+            "you genuinely can't tell, return an empty list."
         )),
-        HumanMessage(content=f"Calendar events:\n{_event_roster(events)}\n\nRequest:\n{message}"),
+        HumanMessage(content=(
+            f"Recent conversation:\n{_recent_context(state)}\n\n"
+            f"EVENTS (id | title | start):\n{_event_roster(events)}\n\n"
+            f"Latest request:\n{message}"
+        )),
     ])
     ids = set(parsed.event_ids)
     targets = [e for e in events if e["id"] in ids]
