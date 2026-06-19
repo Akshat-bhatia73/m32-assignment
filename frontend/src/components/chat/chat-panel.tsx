@@ -35,7 +35,8 @@ import { cn } from "@/lib/utils"
 import { useBoardStore } from "@/stores/board-store"
 import { activeModel, activeReasoning, useModelStore } from "@/stores/model-store"
 
-const UPLOAD_ACCEPT = ".txt,.md,.markdown,.csv,.log,.pdf,image/png,image/jpeg,image/webp,image/gif"
+const UPLOAD_ACCEPT =
+  ".txt,.md,.markdown,.csv,.log,.srt,.vtt,.pdf,image/png,image/jpeg,image/webp,image/gif"
 // A pasted blob longer than this is captured as an artifact instead of filling the composer.
 const PASTE_ARTIFACT_CHARS = 1200
 

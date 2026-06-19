@@ -1,13 +1,14 @@
-"""Turn an uploaded file (text / PDF / image) into plain transcript text.
+"""Turn an uploaded file (text / PDF / image / captions) into plain transcript text.
 
 Used by `POST /meetings/extract` so the chat composer can accept a transcript file or a
-screenshot of notes. Text and PDFs are parsed locally; images are transcribed by the LLM's
-vision capability (Gemini is multimodal). The returned text flows back into the chat as a normal
-message, so the existing router → extractor path handles it unchanged.
+screenshot of notes. Text, caption (.srt/.vtt), and PDF files are parsed locally; images are
+transcribed by the LLM's vision capability (Gemini is multimodal). The returned text flows back
+into the chat as a normal message, so the existing router → extractor path handles it unchanged.
 """
 
 import base64
 import io
+import re
 
 _TEXT_TYPES = {
     "text/plain",
@@ -16,6 +17,9 @@ _TEXT_TYPES = {
     "application/json",
 }
 _TEXT_EXTS = (".txt", ".md", ".markdown", ".csv", ".log", ".text")
+# Caption / subtitle transcripts (meeting tools like Zoom, Teams, Meet export these).
+_CAPTION_TYPES = {"text/vtt", "application/x-subrip"}
+_CAPTION_EXTS = (".srt", ".vtt")
 _IMAGE_TYPES = {"image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"}
 _IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".gif")
 
@@ -34,6 +38,39 @@ class TranscriptError(ValueError):
 
 def _looks_like(filename: str, exts: tuple[str, ...]) -> bool:
     return filename.lower().endswith(exts)
+
+
+# A cue timestamp line, e.g. "00:00:01,000 --> 00:00:04,000" (SRT) or with '.' (VTT).
+_TIMESTAMP_RE = re.compile(r"-->")
+# A bare sequence number (SRT cue index) on its own line.
+_CUE_INDEX_RE = re.compile(r"^\d+$")
+# Inline VTT markup, e.g. "<v Priya>", "<00:00:01.000>", "<c>...</c>".
+_VTT_TAG_RE = re.compile(r"</?[^>]+>")
+
+
+def _clean_captions(raw: str) -> str:
+    """Strip SRT/VTT scaffolding (cue indices, timestamps, headers, inline tags) down to the
+    spoken text, collapsing consecutive duplicate lines that auto-captioners often emit."""
+    lines: list[str] = []
+    for line in raw.splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        if text.upper().startswith("WEBVTT"):
+            continue
+        # Skip VTT metadata blocks (NOTE / STYLE / REGION headers).
+        if text.split(" ", 1)[0] in {"NOTE", "STYLE", "REGION"}:
+            continue
+        if _TIMESTAMP_RE.search(text) or _CUE_INDEX_RE.match(text):
+            continue
+        text = _VTT_TAG_RE.sub("", text).strip()
+        if not text:
+            continue
+        # Auto-generated captions repeat the previous line as new words stream in.
+        if lines and lines[-1] == text:
+            continue
+        lines.append(text)
+    return "\n".join(lines).strip()
 
 
 def _extract_pdf(data: bytes) -> str:
@@ -99,6 +136,15 @@ async def extract_transcript(filename: str, content_type: str | None, data: byte
         return await _extract_image(data, content_type)
     if content_type == "application/pdf" or _looks_like(filename, (".pdf",)):
         return _extract_pdf(data)
+    if content_type in _CAPTION_TYPES or _looks_like(filename, _CAPTION_EXTS):
+        try:
+            raw = data.decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise TranscriptError("That caption file isn't readable as text.") from exc
+        text = _clean_captions(raw)
+        if not text:
+            raise TranscriptError("That caption file has no readable text.")
+        return text
     if content_type in _TEXT_TYPES or _looks_like(filename, _TEXT_EXTS) or not content_type:
         try:
             text = data.decode("utf-8").strip()
@@ -109,5 +155,6 @@ async def extract_transcript(filename: str, content_type: str | None, data: byte
         return text
 
     raise TranscriptError(
-        "Unsupported file type. Upload a .txt, .md, or .pdf transcript, or an image screenshot."
+        "Unsupported file type. Upload a .txt, .md, .srt, .vtt, or .pdf transcript, or an image "
+        "screenshot."
     )

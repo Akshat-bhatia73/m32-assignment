@@ -5,6 +5,7 @@ from app.agents.nodes.comms import (
     _existing_intervals,
     _resolve_owner_emails,
 )
+from app.services.transcript import _clean_captions
 
 MEMBERS = [
     {"id": "1", "name": "Priya Sharma", "email": "priya@acme.com", "role": "owner"},
@@ -43,3 +44,28 @@ def test_conflict_detection_timed_and_all_day():
     assert _conflict_for("2026-06-21", intervals) == "Holiday"
     # A free day has no conflict.
     assert _conflict_for("2026-06-23", intervals) is None
+
+
+def test_clean_captions_srt_strips_indices_and_timestamps():
+    srt = (
+        "1\n"
+        "00:00:01,000 --> 00:00:04,000\n"
+        "Welcome to the sync.\n\n"
+        "2\n"
+        "00:00:04,500 --> 00:00:07,000\n"
+        "Priya fixes the login bug by Friday.\n"
+    )
+    assert _clean_captions(srt) == "Welcome to the sync.\nPriya fixes the login bug by Friday."
+
+
+def test_clean_captions_vtt_strips_header_tags_and_dedupes():
+    vtt = (
+        "WEBVTT\n\n"
+        "NOTE recorded by Meet\n\n"
+        "00:00:01.000 --> 00:00:04.000\n"
+        "<v Priya>Let us start.</v>\n"
+        "<v Priya>Let us start.</v>\n\n"
+        "00:00:05.000 --> 00:00:08.000\n"
+        "David ships the report tomorrow.\n"
+    )
+    assert _clean_captions(vtt) == "Let us start.\nDavid ships the report tomorrow."

@@ -29,7 +29,12 @@ _GROUNDING = (
     "Answer questions about tasks / action items / owners / due dates / statuses ONLY from the "
     "ACTION BOARD above. If it's empty, or doesn't contain what they asked about, say so plainly. "
     "Never invent or guess tasks, owners, dates, statuses, calendar events, or emails. When you "
-    "don't have the data, say you don't have it rather than making something up."
+    "don't have the data, say you don't have it rather than making something up.\n\n"
+    "You are answering, not acting. Do NOT draft emails, schedule events, or change the board in "
+    "this reply. If the user asks what emails or calendar events should be set up (or for similar "
+    "advice), suggest which board items look like they warrant a follow-up email or a calendar "
+    "event, then offer to do it — e.g. 'Want me to draft those emails?' or 'Should I schedule "
+    "these?' — and wait for them to say yes. Keep suggestions grounded in the board items above."
 )
 
 
