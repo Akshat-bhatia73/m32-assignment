@@ -97,10 +97,21 @@ EMAIL_SYSTEM = (
 
 
 class EmailDraft(BaseModel):
+    to: list[str] = Field(
+        default_factory=list,
+        description="Recipient email addresses from the provided roster/request only.",
+    )
     subject: str = Field(description="Concise subject line.")
     body: str = Field(
         description="Email body as plain text with real newlines; any list on its own lines, "
         "signed off with the sender's name."
+    )
+
+
+class EmailDraftPlan(BaseModel):
+    drafts: list[EmailDraft] = Field(
+        min_length=1,
+        description="One email normally; multiple separate emails when the user requests them.",
     )
 
 
@@ -226,8 +237,11 @@ def _email_recipients(
     }
     if named:
         return sorted(named)
-    if pending and pending.get("type") == "send_email" and pending.get("to"):
-        return sorted({email.lower() for email in pending["to"]})
+    if pending:
+        current = pending.get("drafts") or [pending]
+        current_to = {email.lower() for draft in current for email in draft.get("to", [])}
+        if current_to:
+            return sorted(current_to)
     return sorted(fallback)
 
 
@@ -522,6 +536,11 @@ async def _draft_email(state: GraphState, message: str) -> dict:
     organizer = state.get("organizer_email") or state.get("user_email")
     open_items = board_tools.list_items(session_id, open_only=True)
     members = state.get("members") or []
+    roster = "\n".join(
+        f"- {member.get('name')}: {member.get('email')}"
+        for member in members
+        if member.get("email")
+    ) or "(no workspace contacts)"
 
     tool_call_id = uuid.uuid4().hex
     writer({"kind": "tool_input", "tool_call_id": tool_call_id, "tool_name": "draft_email",
@@ -534,18 +553,22 @@ async def _draft_email(state: GraphState, message: str) -> dict:
         + (f", due {i['due_date']}" if i.get("due_date") else "")
         for i in open_items
     ) or "(no action items on the board)"
-    llm = get_llm(temperature=0.4).with_structured_output(EmailDraft)
-    draft: EmailDraft = await llm.ainvoke([
+    llm = get_llm(temperature=0.4).with_structured_output(EmailDraftPlan)
+    plan: EmailDraftPlan = await llm.ainvoke([
         SystemMessage(content=EMAIL_SYSTEM),
         HumanMessage(content=(
             f"Sender name (use in the sign-off): {sender}\n\n"
             f"Write the email the user is asking for. Their request:\n{message}\n\n"
             f"Recent conversation (context):\n{_recent_context(state)}\n\n"
-            f"Action items on the board (use ONLY if relevant to the request):\n{item_lines}"
+            f"Action items on the board (use ONLY if relevant to the request):\n{item_lines}\n\n"
+            f"Workspace contacts (recipient addresses must come from here or the request):\n"
+            f"{roster}\n\n"
+            "Return one draft normally. If the user explicitly asks for multiple separate emails "
+            "or distinct recipients need different content, return one draft per email."
         )),
     ])
     writer({"kind": "tool_output", "tool_call_id": tool_call_id,
-            "output": {"subject": draft.subject}})
+            "output": {"drafts": len(plan.drafts)}})
 
     # Recipients: an address the user named wins; otherwise fall back to item owners + the
     # organizer (the meeting-follow-up default).
@@ -553,21 +576,28 @@ async def _draft_email(state: GraphState, message: str) -> dict:
     if organizer:
         fallback = fallback | {organizer}
     to = _email_recipients(message, members, state.get("pending_action"), fallback)
-    if not to:
-        writer({"kind": "say", "text": "Who should I send this to? Tell me an email address and "
-                "I'll draft it."})
+    allowed = {member["email"].lower() for member in members if member.get("email")}
+    allowed |= {email.lower() for email in EMAIL_RE.findall(message)}
+    if organizer:
+        allowed.add(organizer.lower())
+    drafts = []
+    for draft in plan.drafts:
+        proposed = sorted({email.lower() for email in draft.to if email.lower() in allowed})
+        drafts.append(
+            {"to": proposed or to, "subject": draft.subject, "body": draft.body}
+        )
+    if any(not draft["to"] for draft in drafts):
+        writer({"kind": "say", "text": "Who should I send these to? Tell me the email addresses "
+                "and I'll prepare the drafts."})
         return {}
-
-    session_tools.set_pending_action(
-        session_id,
-        {"type": "send_email", "to": to, "subject": draft.subject, "body": draft.body},
-    )
-    # Structured part → the client renders an editable email card with a "Send" action.
-    writer({"kind": "email_draft", "to": to, "subject": draft.subject, "body": draft.body})
+    session_tools.set_pending_action(session_id, {"type": "send_emails", "drafts": drafts})
+    # One structured part per draft; the client renders every part as a separate card.
+    for draft in drafts:
+        writer({"kind": "email_draft", **draft})
     # Plain-text twin: persisted for history, shown as a fallback on reload.
-    writer({"kind": "say", "text": "Here's a draft:\n\n"
-            f"To: {', '.join(to)}\nSubject: {draft.subject}\n\n{draft.body}\n\n"
-            "Use the buttons below to send it, or tell me what to change."})
+    intro = f"Here are {len(drafts)} drafts" if len(drafts) != 1 else "Here's a draft"
+    writer({"kind": "say", "text": f"{intro}. Review the cards below, then approve "
+            "to send them, or tell me what to change."})
     return {}
 
 

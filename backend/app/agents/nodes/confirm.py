@@ -96,26 +96,37 @@ async def confirm_node(state: GraphState) -> dict:
         writer({"kind": "say", "text": f"Added {count} action item{suffix} to the board."})
         return {"meeting_id": meeting_id, "extracted": created}
 
-    if action_type == "send_email":
+    if action_type in {"send_email", "send_emails"}:
+        drafts = pending.get("drafts") or [pending]
         tool_call_id = uuid.uuid4().hex
         writer(
             {
                 "kind": "tool_input",
                 "tool_call_id": tool_call_id,
                 "tool_name": "send_email",
-                "input": {"to": pending["to"], "subject": pending["subject"]},
+                "input": {"drafts": len(drafts)},
             }
         )
-        result = composio_tools.send_gmail(
-            user_id=composio_user_id,
-            to=pending["to"],
-            subject=pending["subject"],
-            body=pending["body"],
-        )
-        status = result.get("status")
-        writer({"kind": "tool_output", "tool_call_id": tool_call_id, "output": {"status": status}})
-        if status == "error":
-            detail = result.get("error")
+        sent, failed, simulated = 0, 0, False
+        failed_drafts = []
+        detail = None
+        for draft in drafts:
+            result = composio_tools.send_gmail(
+                user_id=composio_user_id,
+                to=draft["to"],
+                subject=draft["subject"],
+                body=draft["body"],
+            )
+            if result.get("status") == "error":
+                failed += 1
+                failed_drafts.append(draft)
+                detail = result.get("error") or detail
+            else:
+                sent += 1
+                simulated = simulated or result.get("status") == "simulated"
+        writer({"kind": "tool_output", "tool_call_id": tool_call_id,
+                "output": {"sent": sent, "failed": failed}})
+        if not sent and failed:
             # Log the real Composio error server-side (the usual cause is the connected account's
             # external user_id not matching the app-login email we send as).
             logger.error("Gmail send failed for user_id=%s: %s", composio_user_id, detail)
@@ -126,11 +137,13 @@ async def confirm_node(state: GraphState) -> dict:
                  f"again.{hint}"}
             )
             return {}  # keep the pending action so a retry works
-        session_tools.set_pending_action(session_id, None)
-        sim = " (simulated — add a Composio key to send for real)" if status == "simulated" else ""
-        writer(
-            {"kind": "say", "text": f"Sent the follow-up to {', '.join(pending['to'])}{sim}."}
+        session_tools.set_pending_action(
+            session_id,
+            {"type": "send_emails", "drafts": failed_drafts} if failed_drafts else None,
         )
+        sim = " (simulated — add a Composio key to send for real)" if simulated else ""
+        tail = f" {failed} failed." if failed else ""
+        writer({"kind": "say", "text": f"Sent {sent} email{'s' if sent != 1 else ''}{sim}.{tail}"})
         return {}
 
     if action_type == "create_events":

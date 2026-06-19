@@ -29,12 +29,15 @@ def _pending_context(pending: dict | None) -> str:
     """Expose the current proposal so conversational questions can be answered accurately."""
     if not pending:
         return "PENDING PROPOSAL: none."
-    if pending.get("type") == "send_email":
-        recipients = ", ".join(pending.get("to", [])) or "none"
+    if pending.get("type") in {"send_email", "send_emails"}:
+        drafts = pending.get("drafts") or [pending]
+        lines = [
+            f"- To: {', '.join(draft.get('to', [])) or 'none'}; "
+            f"Subject: {draft.get('subject') or '(no subject)'}"
+            for draft in drafts
+        ]
         return (
-            "PENDING EMAIL DRAFT (not sent):\n"
-            f"- To: {recipients}\n"
-            f"- Subject: {pending.get('subject') or '(no subject)'}"
+            "PENDING EMAIL DRAFTS (not sent):\n" + "\n".join(lines)
         )
     return f"PENDING PROPOSAL (not executed): type={pending.get('type')}"
 

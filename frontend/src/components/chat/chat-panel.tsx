@@ -215,15 +215,23 @@ export function ChatPanel({
   }
 
   // Confirm + send an email draft card — routes to the confirm node, which sends via Gmail.
-  function sendEmailDraft(messageId: string) {
+  function sendEmailDraft(messageId: string, draftCount: number) {
     if (busy) return
-    setSentDrafts((s) => new Set(s).add(messageId))
+    setSentDrafts((current) => {
+      const next = new Set(current)
+      for (let index = 0; index < draftCount; index++) next.add(`${messageId}:${index}`)
+      return next
+    })
     decide("Send it")
   }
 
-  function declineEmailDraft(messageId: string) {
+  function declineEmailDraft(messageId: string, draftCount: number) {
     if (busy) return
-    setDeclinedDrafts((s) => new Set(s).add(messageId))
+    setDeclinedDrafts((current) => {
+      const next = new Set(current)
+      for (let index = 0; index < draftCount; index++) next.add(`${messageId}:${index}`)
+      return next
+    })
     decide("Cancel")
   }
 
@@ -321,10 +329,9 @@ export function ChatPanel({
               const artifacts = meta(message).artifacts ?? []
               const time = formatTime(meta(message).createdAt ?? liveTimes[message.id])
               const hasText = messageText(message).length > 0
-              const emailPart = message.parts.find((p) => p.type === "data-email-draft")
-              const emailDraft = emailPart
-                ? (emailPart as { data: EmailDraftEvent }).data
-                : undefined
+              const emailDrafts = message.parts
+                .filter((p) => p.type === "data-email-draft")
+                .map((p) => (p as { data: EmailDraftEvent }).data)
               const proposalPart = message.parts.find((p) => p.type === "data-calendar-proposal")
               const proposal = proposalPart
                 ? (proposalPart as { data: CalendarProposalEvent }).data
@@ -336,7 +343,7 @@ export function ChatPanel({
                 ? (calendarActionPart as { data: CalendarActionEvent }).data
                 : undefined
               // Cards carry their own copy; suppress the plain-text twin when one is present.
-              const hasCard = !!emailDraft || !!proposal || !!calendarAction
+              const hasCard = emailDrafts.length > 0 || !!proposal || !!calendarAction
               // Only show the bubble when it has something inside it — a text-only
               // attachment (paste/upload with no typed message) shows just the chip.
               const hasBubble =
@@ -370,16 +377,20 @@ export function ChatPanel({
                           }
                           return null
                         })}
-                        {emailDraft ? (
-                          <EmailDraftCard
-                            draft={emailDraft}
-                            sent={sentDrafts.has(message.id)}
-                            declined={declinedDrafts.has(message.id)}
-                            busy={busy || readOnly}
-                            onSend={() => sendEmailDraft(message.id)}
-                            onDecline={() => declineEmailDraft(message.id)}
-                          />
-                        ) : null}
+                        {emailDrafts.map((draft, index) => {
+                          const draftId = `${message.id}:${index}`
+                          return (
+                            <EmailDraftCard
+                              key={draftId}
+                              draft={draft}
+                              sent={sentDrafts.has(draftId)}
+                              declined={declinedDrafts.has(draftId)}
+                              busy={busy || readOnly}
+                              onSend={() => sendEmailDraft(message.id, emailDrafts.length)}
+                              onDecline={() => declineEmailDraft(message.id, emailDrafts.length)}
+                            />
+                          )
+                        })}
                         {proposal ? (
                           <CalendarProposalCard
                             proposal={proposal}
