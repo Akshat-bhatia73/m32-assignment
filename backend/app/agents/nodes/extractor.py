@@ -24,8 +24,10 @@ EXTRACTOR_SYSTEM = (
     "- owner: the person responsible if named, else null.\n"
     "- due_date: an ISO date (YYYY-MM-DD) if a deadline is stated or implied "
     "(resolve relative dates like 'Friday' or 'next week' against today's date), else null.\n"
-    "Only include real, actionable tasks. Ignore chit-chat. "
-    "If there are none, return an empty list."
+    "Use ONLY information present in the notes. Do NOT invent tasks, people, or deadlines. If an "
+    "owner is not named, set owner to null — never guess a name. If no due date is stated or "
+    "clearly implied, set due_date to null — never guess a date. Only include real, actionable "
+    "tasks. Ignore chit-chat. If there are none, return an empty list."
 )
 
 

@@ -89,7 +89,9 @@ EMAIL_SYSTEM = (
     "<sender name>\n\n"
     "Rules: put each action item on its OWN line starting with '- '. Omit 'due <date>' when there "
     "is no due date, and omit the owner when none is given. Sign off with 'Thanks,' on its own "
-    "line followed by the sender's name on the next line. Keep the whole body under ~150 words."
+    "line followed by the sender's name on the next line. Keep the whole body under ~150 words.\n"
+    "Summarize ONLY the action items provided — do not invent or add tasks, people, dates, "
+    "numbers, decisions, or commitments that are not in the list."
 )
 
 

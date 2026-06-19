@@ -28,8 +28,10 @@ EDIT_SYSTEM = (
     "fields that change. For due_date use an ISO date. To clear an owner or due_date, set the "
     "field to the literal string '__clear__'. Valid status values: open, scheduled, sent, done.\n"
     "- 'delete': remove an existing item (set 'target_id').\n"
-    "Match existing items by meaning (task text / owner). If the request asks to create/add a "
-    "task, use 'add'. If nothing is actionable, return an empty list."
+    "Match existing items by meaning (task text / owner) ONLY against the board provided — for "
+    "'update' and 'delete', use a target_id that actually appears in the board. Do not invent "
+    "items, owners, or dates; for 'add', use only details the user actually gave. If the request "
+    "asks to create/add a task, use 'add'. If nothing is actionable, return an empty list."
 )
 
 
